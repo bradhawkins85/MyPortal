@@ -219,7 +219,7 @@ async def counts() -> dict[str, int]:
 
 async def get_state() -> dict[str, Any]:
     row = await db.fetch_one(
-        "SELECT nvd_synced_at, kev_synced_at, matched_at, requested_at, running_since, last_error "
+        "SELECT nvd_synced_at, kev_synced_at, matched_at, requested_at, running_since, failed_at, last_error "
         "FROM vuln_sync_state WHERE id = 1"
     )
     return dict(row) if row else {}
@@ -232,6 +232,7 @@ _STATE_UPDATES = {
     "matched_at": "UPDATE vuln_sync_state SET matched_at = %s WHERE id = 1",
     "requested_at": "UPDATE vuln_sync_state SET requested_at = %s WHERE id = 1",
     "running_since": "UPDATE vuln_sync_state SET running_since = %s WHERE id = 1",
+    "failed_at": "UPDATE vuln_sync_state SET failed_at = %s WHERE id = 1",
     "last_error": "UPDATE vuln_sync_state SET last_error = %s WHERE id = 1",
 }
 
