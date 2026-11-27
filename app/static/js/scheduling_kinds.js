@@ -55,8 +55,10 @@
   }
 
   function openEditor(kind, trigger) {
-    const editing = Boolean(kind && kind.id);
-    form.setAttribute('action', editing ? '/admin/schedule/kinds/' + kind.id : '/admin/schedule/kinds');
+    // Only a positive integer ID ever reaches the form URLs.
+    const kindId = kind ? Number.parseInt(String(kind.id), 10) : NaN;
+    const editing = Number.isSafeInteger(kindId) && kindId > 0;
+    form.setAttribute('action', editing ? `/admin/schedule/kinds/${kindId}` : '/admin/schedule/kinds');
     form.querySelector('[data-sch-kind-title]').textContent = editing ? 'Edit booking kind' : 'Add booking kind';
     labelInput.value = editing ? kind.label : '';
     const radio = form.querySelector(`[name="tone"][value="${CSS.escape(editing ? kind.tone : 'accent')}"]`);
@@ -71,7 +73,7 @@
       : 'Not used by any appointment yet.';
     deleteButton.hidden = !editing || isDefault;
     deleteButton.textContent = count ? 'Archive' : 'Delete';
-    deleteForm.setAttribute('action', '/admin/schedule/kinds/' + (editing ? kind.id : 0) + '/delete');
+    deleteForm.setAttribute('action', `/admin/schedule/kinds/${editing ? kindId : 0}/delete`);
     if (labelError) labelError.hidden = true;
     form.querySelectorAll('.alert').forEach((alert) => alert.remove());
     dirty = false;
