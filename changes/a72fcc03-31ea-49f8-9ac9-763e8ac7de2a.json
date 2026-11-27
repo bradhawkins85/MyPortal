@@ -1,0 +1,7 @@
+{
+  "guid": "a72fcc03-31ea-49f8-9ac9-763e8ac7de2a",
+  "occurred_at": "2026-11-26T23:29Z",
+  "change_type": "Feature",
+  "summary": "Service agreements record what each client's contract covers (managed, hours each period or a prepaid block) and show hours used, left and over from their ticket time, with alerts as hours run low or the agreement nears its end.",
+  "content_hash": "021eaa7b5b589491ce5cc51e903d3b4b2de86b5235eb1afa97518646b7697d92"
+}

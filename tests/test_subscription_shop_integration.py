@@ -60,6 +60,7 @@ def test_create_subscriptions_from_order_applies_vip_pricing(monkeypatch):
 def test_create_subscriptions_adopts_existing_recurring_item(monkeypatch):
     existing = {
         "id": 77,
+        "active": 1,
         "qty_expression": "8",
         "start_date": date(2026, 1, 1),
         "end_date": date(2026, 12, 31),
@@ -200,3 +201,54 @@ def test_create_subscriptions_uses_monthly_price_option_for_term(monkeypatch):
     assert created_payload["unit_price"] == Decimal("125.00")
     term = created_payload["end_date"] - created_payload["start_date"]
     assert term.days == 30
+
+
+def test_create_subscriptions_ignores_quantity_of_inactive_recurring_item(monkeypatch):
+    """A deleted subscription's deactivated item must not add to a new order."""
+    inactive = {
+        "id": 88,
+        "active": 0,
+        "qty_expression": "1",
+        "start_date": date(2026, 10, 1),
+        "end_date": date(2026, 11, 26),
+        "last_billed_at": datetime(2026, 10, 1),
+    }
+    created_payload: dict = {}
+    synced: dict = {}
+
+    async def order_items(*_args):
+        return [{"product_id": 1, "quantity": 1, "is_vip": 0}]
+
+    async def products(*_args, **_kwargs):
+        return [{"id": 1, "sku": "AIRM200", "name": "AI Receptionist",
+                 "subscription_category_id": 10, "commitment_type": None,
+                 "payment_frequency": None, "price_monthly_commitment": "125.00",
+                 "price": "0.00", "vip_price": None}]
+
+    async def find(*_args):
+        return inactive
+
+    async def create(**values):
+        created_payload.update(values)
+        return {"id": "sub-1", **values}
+
+    async def sync(subscription, **values):
+        synced.update(values)
+        return {"id": 88}
+
+    monkeypatch.setattr(integration.shop_repo, "list_order_items", order_items)
+    monkeypatch.setattr(integration.shop_repo, "list_products_by_ids", products)
+    monkeypatch.setattr(integration.subscription_billing, "find_existing_item", find)
+    monkeypatch.setattr(integration.subscription_billing, "sync_subscription_recurring_item", sync)
+    monkeypatch.setattr(integration.subscriptions_repo, "create_subscription", create)
+
+    created = asyncio.run(integration.create_subscriptions_from_order(
+        order_number="ORD-5", company_id=99, user_id=42
+    ))
+
+    assert len(created) == 1
+    assert created_payload["quantity"] == 1
+    assert created_payload["start_date"] == date.today()
+    assert (created_payload["end_date"] - created_payload["start_date"]).days == 30
+    # The deactivated row is reused (no duplicate SKU row) with a fresh schedule.
+    assert synced == {"existing": inactive, "preserve_existing_schedule": False}

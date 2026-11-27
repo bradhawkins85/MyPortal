@@ -1,0 +1,7 @@
+{
+  "guid": "8e2b72c8-b505-4173-9a46-5ba78f008b00",
+  "occurred_at": "2026-11-27T00:10Z",
+  "change_type": "Fix",
+  "summary": "The My schedule page's week heading no longer fails the server-side date formatting check that keeps dates in each viewer's time zone.",
+  "content_hash": "f6466815222ca4190e7d2dd00089ebd842293f07ee97e05f2303ede9e03a7635"
+}
