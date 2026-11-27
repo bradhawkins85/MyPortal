@@ -517,28 +517,26 @@
     const productsTable = document.getElementById('admin-products-table');
 
     // ── Column visibility ────────────────────────────────────────────────────
-    const COLUMNS_STORAGE_KEY = 'shop_admin_columns';
+    // Saved per user in the database (see view_preferences.js); the old
+    // browser-only key is transferred the first time the page loads.
+    const COLUMNS_PREFERENCE_KEY = 'tables:shop-products:columns';
+    const LEGACY_COLUMNS_STORAGE_KEY = 'shop_admin_columns';
     const FILTER_STATE_KEY = 'shop_admin_filter_state';
     const COLUMN_KEYS = ['image', 'name', 'sku', 'vendor-sku', 'dbp', 'price', 'vip', 'profit', 'vip-profit', 'category', 'stock'];
 
-    function loadColumnPrefs() {
-      try {
-        const raw = localStorage.getItem(COLUMNS_STORAGE_KEY);
-        if (raw) {
-          return JSON.parse(raw);
-        }
-      } catch (e) {
-        console.warn('shop_admin: could not load column preferences', e);
+    function normaliseHiddenColumns(value) {
+      if (!value || !Array.isArray(value.hidden)) {
+        return null;
       }
-      return {};
+      return { hidden: value.hidden.filter((key) => COLUMN_KEYS.includes(key)) };
     }
 
-    function saveColumnPrefs(prefs) {
-      try {
-        localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(prefs));
-      } catch (e) {
-        console.warn('shop_admin: could not save column preferences', e);
+    function legacyHiddenColumns() {
+      const stored = window.MyPortalViewPrefs.readLegacyJson(LEGACY_COLUMNS_STORAGE_KEY);
+      if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+        return null;
       }
+      return { hidden: COLUMN_KEYS.filter((key) => stored[key] === false) };
     }
 
     function applyColumnVisibility(columnKey, visible) {
@@ -570,22 +568,48 @@
       });
     }
 
-    const columnPrefs = loadColumnPrefs();
+    if (window.MyPortalViewPrefs) {
+      const columnCheckboxes = {};
 
-    COLUMN_KEYS.forEach((key) => {
-      const visible = columnPrefs[key] !== false;
-      applyColumnVisibility(key, visible);
-      const checkbox = columnsMenu ? columnsMenu.querySelector(`[data-column-toggle="${key}"]`) : null;
-      if (checkbox) {
-        checkbox.checked = visible;
-        checkbox.addEventListener('change', () => {
-          const prefs = loadColumnPrefs();
-          prefs[key] = checkbox.checked;
-          saveColumnPrefs(prefs);
-          applyColumnVisibility(key, checkbox.checked);
+      const renderColumnPrefs = (prefs) => {
+        const hidden = prefs && Array.isArray(prefs.hidden) ? prefs.hidden : [];
+        COLUMN_KEYS.forEach((key) => {
+          const visible = !hidden.includes(key);
+          applyColumnVisibility(key, visible);
+          if (columnCheckboxes[key]) {
+            columnCheckboxes[key].checked = visible;
+          }
         });
-      }
-    });
+      };
+
+      COLUMN_KEYS.forEach((key) => {
+        const checkbox = columnsMenu ? columnsMenu.querySelector(`[data-column-toggle="${key}"]`) : null;
+        if (checkbox) {
+          columnCheckboxes[key] = checkbox;
+        }
+      });
+
+      const columnPreference = window.MyPortalViewPrefs.bind({
+        key: COLUMNS_PREFERENCE_KEY,
+        defaults: { hidden: [] },
+        normalise: normaliseHiddenColumns,
+        equals: (a, b) => window.MyPortalViewPrefs.sameMembers(a && a.hidden, b && b.hidden),
+        legacy: legacyHiddenColumns,
+        legacyKeys: [LEGACY_COLUMNS_STORAGE_KEY],
+        apply: renderColumnPrefs,
+      });
+      renderColumnPrefs(columnPreference.initial);
+
+      Object.keys(columnCheckboxes).forEach((key) => {
+        const checkbox = columnCheckboxes[key];
+        checkbox.addEventListener('change', () => {
+          applyColumnVisibility(key, checkbox.checked);
+          columnPreference.save({
+            hidden: COLUMN_KEYS.filter((columnKey) => columnCheckboxes[columnKey] && !columnCheckboxes[columnKey].checked),
+          });
+        });
+      });
+    }
     // ── End column visibility ─────────────────────────────────────────────────
 
     const adminProductSearch = document.querySelector('[data-admin-product-search]');

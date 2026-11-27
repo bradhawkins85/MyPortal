@@ -114,17 +114,37 @@ Use the macros from `templates/macros/tables.html`:
 ### 5.1 Column-visibility persistence
 
 `app/static/js/table_columns.js` is wired into `base.html`. For every
-`<table data-table data-table-id="…">` it:
+`<table data-table data-table-id="…">` that has a column picker it:
 
-- Reads the saved visibility set from `localStorage` under
-  `myportal:tables:<table_id>:columns`.
-- For authenticated users, fetches `/api/users/me/preferences?key=tables:<table_id>:columns`
-  on load and pushes back to `PUT /api/users/me/preferences` on change so
-  preferences follow the user across devices. The localStorage cache is the
-  fast path; the API is the source of truth.
+- Saves the layout per user in the database through
+  `app/static/js/view_preferences.js` (`MyPortalViewPrefs`), under the
+  preference key `tables:<table_id>:columns`
+  (`GET`/`PUT /api/users/me/preferences`). The layout follows the user
+  between devices and survives a cleared browser; localStorage only holds a
+  per-user copy so the last layout paints before the request returns.
 - Toggles the `is-hidden` utility class on matching `<th>` and `<td>` cells
   (matched by `data-column-key`).
 - Provides a "Reset to defaults" item in every column picker.
+
+Page-specific pickers (tickets, staff, chat, assets, shop products) use the
+same helper via `MyPortalViewPrefs.bindVisibleColumns` / `bind`; new pickers
+must too, never a bare localStorage key.
+
+Every stored layout carries an `is_modified` flag (`user_preferences.is_modified`):
+
+- **New users** get the page's default columns, recorded with
+  `is_modified = 0`.
+- **First visit after this change**: if the browser holds a layout under the
+  page's old localStorage key, it is transferred to the database (flagged
+  modified only if it differs from the default) and the old key is removed.
+  A record already saved from another device is never overwritten (the
+  `seed` mode of `PUT /api/users/me/preferences`).
+- **Changing a column** sets `is_modified = 1`; *Reset to defaults* sets it
+  back to `0`.
+- While `is_modified = 0` the page applies its **current** default layout
+  and keeps the stored value in step, so changing a default layout reaches
+  everyone who never customised that page and leaves customised layouts
+  alone.
 
 ### 5.2 Column metadata
 

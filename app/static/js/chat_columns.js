@@ -1,32 +1,11 @@
 (function () {
   'use strict';
 
-  const STORAGE_KEY = 'portal.chat.columns';
+  // Saved per user in the database (see view_preferences.js); the old
+  // browser-only key is transferred the first time the page loads.
+  const PREFERENCE_KEY = 'tables:chat-rooms:visible-columns';
+  const LEGACY_STORAGE_KEY = 'portal.chat.columns';
   const REQUIRED_COLUMN = 'subject';
-
-  function loadVisibleColumns(defaultColumns) {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw === null) {
-        return defaultColumns;
-      }
-      const stored = JSON.parse(raw);
-      if (Array.isArray(stored) && stored.length > 0 && stored.every((item) => typeof item === 'string')) {
-        return stored;
-      }
-    } catch (err) {
-      console.warn('Failed to read stored chat column preferences', err);
-    }
-    return defaultColumns;
-  }
-
-  function saveVisibleColumns(columns) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(columns));
-    } catch (err) {
-      console.warn('Failed to persist chat column preferences', err);
-    }
-  }
 
   function setColumnVisibility(table, column, visible) {
     if (!table || !column) {
@@ -47,7 +26,7 @@
     const toggleButton = container.querySelector('[data-columns-toggle]');
     const panel = container.querySelector('[data-columns-panel]');
     const toggles = Array.from(container.querySelectorAll('.chat-column-toggle'));
-    if (!toggleButton || !panel || toggles.length === 0) {
+    if (!toggleButton || !panel || toggles.length === 0 || !window.MyPortalViewPrefs) {
       return;
     }
 
@@ -86,21 +65,28 @@
       }
     });
 
-    const defaultColumns = toggles.filter((input) => input.checked).map((input) => input.dataset.column).filter(Boolean);
-    const visibleColumns = loadVisibleColumns(defaultColumns);
-    if (!visibleColumns.includes(REQUIRED_COLUMN)) {
-      visibleColumns.push(REQUIRED_COLUMN);
+    function renderColumns(columns) {
+      toggles.forEach((input) => {
+        const column = input.dataset.column;
+        if (!column) {
+          return;
+        }
+        const shouldShow = column === REQUIRED_COLUMN || columns.includes(column);
+        input.checked = shouldShow;
+        setColumnVisibility(table, column, shouldShow);
+      });
     }
 
-    toggles.forEach((input) => {
-      const column = input.dataset.column;
-      if (!column) {
-        return;
-      }
-      const shouldShow = column === REQUIRED_COLUMN || visibleColumns.includes(column);
-      input.checked = shouldShow;
-      setColumnVisibility(table, column, shouldShow);
+    const defaultColumns = toggles.filter((input) => input.checked).map((input) => input.dataset.column).filter(Boolean);
+    const preference = window.MyPortalViewPrefs.bindVisibleColumns({
+      key: PREFERENCE_KEY,
+      defaults: defaultColumns,
+      available: toggles.map((input) => input.dataset.column).filter(Boolean),
+      required: REQUIRED_COLUMN,
+      legacyKey: LEGACY_STORAGE_KEY,
+      apply: renderColumns,
     });
+    renderColumns(preference.initial);
 
     toggles.forEach((input) => {
       input.addEventListener('change', () => {
@@ -119,7 +105,7 @@
         if (!selected.includes(REQUIRED_COLUMN)) {
           selected.push(REQUIRED_COLUMN);
         }
-        saveVisibleColumns(selected);
+        preference.save(selected);
         setColumnVisibility(table, column, input.checked);
       });
     });

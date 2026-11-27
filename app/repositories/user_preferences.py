@@ -4,6 +4,11 @@ Stored in the ``user_preferences`` table introduced in migration 208.
 Each preference is a (user_id, preference_key) pair carrying an arbitrary
 JSON document. Keys follow the convention ``<area>:<id>:<aspect>`` — for
 example ``tables:tickets-history:columns``.
+
+Each row also carries ``is_modified`` (migration 588): true once the user has
+changed the preference away from the page default, false while the row only
+records the default layout. Rows with ``is_modified`` false can safely be
+moved to a new default layout without overriding a user's own choices.
 """
 from __future__ import annotations
 
@@ -74,33 +79,105 @@ async def get_preference(user_id: int, key: str) -> Any:
     return _deserialise_value(row.get("preference_value"))
 
 
-async def set_preference(user_id: int, key: str, value: Any) -> Any:
-    """Upsert ``key`` for ``user_id``. Returns the value as stored."""
+async def get_preference_record(user_id: int, key: str) -> dict[str, Any] | None:
+    """Return ``{"value": …, "is_modified": bool}`` for ``key`` or ``None``."""
+    validate_key(key)
+    row = await db.fetch_one(
+        """
+        SELECT preference_value, is_modified
+        FROM user_preferences
+        WHERE user_id = ? AND preference_key = ?
+        """,
+        (user_id, key),
+    )
+    if not row:
+        return None
+    return {
+        "value": _deserialise_value(row.get("preference_value")),
+        "is_modified": bool(row.get("is_modified")),
+    }
+
+
+async def set_preference(
+    user_id: int,
+    key: str,
+    value: Any,
+    *,
+    is_modified: bool = True,
+) -> Any:
+    """Upsert ``key`` for ``user_id``. Returns the value as stored.
+
+    ``is_modified`` defaults to true because callers normally save in response
+    to a user's change; pass false when restoring the page default.
+    """
     validate_key(key)
     payload = _serialise_value(value)
+    modified_flag = 1 if is_modified else 0
     if db.is_sqlite():
         await db.execute(
             """
-            INSERT INTO user_preferences (user_id, preference_key, preference_value)
-            VALUES (?, ?, ?)
+            INSERT INTO user_preferences (user_id, preference_key, preference_value, is_modified)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(user_id, preference_key) DO UPDATE SET
                 preference_value = excluded.preference_value,
+                is_modified = excluded.is_modified,
                 updated_at = datetime('now')
             """,
-            (user_id, key, payload),
+            (user_id, key, payload, modified_flag),
         )
     else:
         await db.execute(
             """
-            INSERT INTO user_preferences (user_id, preference_key, preference_value)
-            VALUES (%s, %s, %s)
+            INSERT INTO user_preferences (user_id, preference_key, preference_value, is_modified)
+            VALUES (%s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 preference_value = VALUES(preference_value),
+                is_modified = VALUES(is_modified),
                 updated_at = CURRENT_TIMESTAMP
             """,
-            (user_id, key, payload),
+            (user_id, key, payload, modified_flag),
         )
     return value
+
+
+async def seed_preference(
+    user_id: int,
+    key: str,
+    value: Any,
+    *,
+    is_modified: bool,
+) -> dict[str, Any]:
+    """Create ``key`` for ``user_id`` only if it does not exist yet.
+
+    Used to transfer a browser's legacy settings (or the page default) into
+    the database the first time a user opens a page. An existing row is never
+    overwritten, so a layout saved from another device wins. Returns the
+    record as it is now stored.
+    """
+    validate_key(key)
+    payload = _serialise_value(value)
+    modified_flag = 1 if is_modified else 0
+    if db.is_sqlite():
+        await db.execute(
+            """
+            INSERT INTO user_preferences (user_id, preference_key, preference_value, is_modified)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, preference_key) DO NOTHING
+            """,
+            (user_id, key, payload, modified_flag),
+        )
+    else:
+        await db.execute(
+            """
+            INSERT IGNORE INTO user_preferences (user_id, preference_key, preference_value, is_modified)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (user_id, key, payload, modified_flag),
+        )
+    record = await get_preference_record(user_id, key)
+    if record is None:
+        return {"value": value, "is_modified": is_modified}
+    return record
 
 
 async def delete_preference(user_id: int, key: str) -> None:

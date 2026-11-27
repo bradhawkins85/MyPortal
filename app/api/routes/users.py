@@ -74,13 +74,19 @@ async def get_my_preference(
     _: None = Depends(require_database),
     current_user: dict = Depends(get_current_user),
 ):
-    """Return the current user's value for a single UI preference key."""
+    """Return the current user's value for a single UI preference key.
+
+    ``exists`` is false when nothing is stored yet; ``is_modified`` is true
+    once the user has changed the preference away from the page default.
+    """
     try:
         user_preferences_repo.validate_key(key)
     except user_preferences_repo.InvalidPreferenceKey:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid preference key")
-    value = await user_preferences_repo.get_preference(int(current_user["id"]), key)
-    return {"key": key, "value": value}
+    record = await user_preferences_repo.get_preference_record(int(current_user["id"]), key)
+    if record is None:
+        return {"key": key, "value": None, "is_modified": False, "exists": False}
+    return {"key": key, "value": record["value"], "is_modified": record["is_modified"], "exists": True}
 
 
 @router.put("/me/preferences")
@@ -91,21 +97,37 @@ async def update_my_preference(
 ):
     """Upsert a single UI preference for the current user.
 
-    Body: ``{"key": "<area>:<id>:<aspect>", "value": <jsonable>}``
+    Body: ``{"key": "<area>:<id>:<aspect>", "value": <jsonable>,
+    "modified": <bool, default true>, "seed": <bool, default false>}``
+
+    ``modified`` records whether the value is the user's own change (true) or
+    the page default (false). With ``seed`` true the value is only stored when
+    the user has nothing saved yet, so an existing layout is never replaced;
+    the response always describes what is stored.
     """
     if not isinstance(payload, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload")
     key = payload.get("key")
     value = payload.get("value")
+    modified = payload.get("modified", True)
+    seed = payload.get("seed", False)
+    if not isinstance(modified, bool) or not isinstance(seed, bool):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload")
     try:
         user_preferences_repo.validate_key(key)
     except user_preferences_repo.InvalidPreferenceKey:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid preference key")
+    user_id = int(current_user["id"])
     try:
-        stored = await user_preferences_repo.set_preference(int(current_user["id"]), key, value)
+        if seed:
+            record = await user_preferences_repo.seed_preference(
+                user_id, key, value, is_modified=modified
+            )
+            return {"key": key, "value": record["value"], "is_modified": record["is_modified"]}
+        stored = await user_preferences_repo.set_preference(user_id, key, value, is_modified=modified)
     except user_preferences_repo.InvalidPreferenceValue as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    return {"key": key, "value": stored}
+    return {"key": key, "value": stored, "is_modified": modified}
 
 
 @router.delete("/me/preferences", status_code=status.HTTP_204_NO_CONTENT)
