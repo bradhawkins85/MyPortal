@@ -124,6 +124,18 @@ async def get_settings() -> dict[str, Any]:
     return dict(row) if row else {}
 
 
+async def get_busy_sync_state() -> dict[str, Any]:
+    row = await db.fetch_one("SELECT busy_synced_at, busy_sync_error FROM scheduling_settings WHERE id = 1")
+    return dict(row) if row else {}
+
+
+async def record_busy_sync(*, synced_at: datetime, error: str | None) -> None:
+    await db.execute(
+        "UPDATE scheduling_settings SET busy_synced_at = %s, busy_sync_error = %s WHERE id = 1",
+        (synced_at, (error or "")[:500] or None),
+    )
+
+
 async def save_settings(values: dict[str, Any]) -> None:
     params = (values.get("m365_company_id"), values.get("timezone"), values["day_start_hour"],
               values["day_end_hour"], values["default_duration_minutes"])
@@ -152,3 +164,42 @@ async def list_unscheduled_tickets(now: datetime, limit: int = 100) -> list[dict
         (now, limit),
     )
     return [dict(row) for row in rows or []]
+
+
+# --------------------------------------------------------------------------- #
+# Busy time imported from technicians' calendars (no event details are stored)
+# --------------------------------------------------------------------------- #
+
+
+async def replace_busy_times(technician_user_id: int, start: datetime, end: datetime,
+                             blocks: list[tuple[datetime, datetime, str]], *, synced_at: datetime) -> None:
+    """Replace a technician's imported busy time overlapping ``start``–``end``."""
+
+    await db.execute(
+        "DELETE FROM technician_busy_times WHERE technician_user_id = %s AND starts_at < %s AND ends_at > %s",
+        (technician_user_id, end, start),
+    )
+    if blocks:
+        await db.execute_many(
+            "INSERT INTO technician_busy_times (technician_user_id, starts_at, ends_at, show_as, synced_at) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            [(technician_user_id, block_start, block_end, show_as, synced_at)
+             for block_start, block_end, show_as in blocks],
+        )
+
+
+async def clear_busy_times() -> None:
+    await db.execute("DELETE FROM technician_busy_times")
+
+
+async def list_busy_between(start: datetime, end: datetime, *,
+                            technician_user_id: int | None = None) -> list[dict[str, Any]]:
+    sql = ("SELECT id, technician_user_id, starts_at, ends_at, show_as FROM technician_busy_times "
+           "WHERE starts_at < %s AND ends_at > %s")
+    params: list[Any] = [end, start]
+    if technician_user_id is not None:
+        sql += " AND technician_user_id = %s"
+        params.append(technician_user_id)
+    rows = await db.fetch_all(sql + " ORDER BY starts_at, id", tuple(params))
+    return [{**dict(row), "id": int(row["id"]), "technician_user_id": int(row["technician_user_id"])}
+            for row in rows or []]

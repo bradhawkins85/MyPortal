@@ -40,7 +40,7 @@
   <section class="card card--panel admin-grid__full" aria-labelledby="sch-board-heading">
     <div class="card__header"><div>
       <h2 class="card__title" id="sch-board-heading">Dispatch board</h2>
-      <p class="card__subtitle">Each technician's day from {{ "%02d:00" | format(settings.day_start_hour) }} to {{ "%02d:00" | format(settings.day_end_hour) }} ({{ settings.timezone }}). Click an appointment to change it, or an empty spot on a technician's row to book them then.{% if settings.calendar_sync %} Appointments are also written to technicians' Microsoft 365 calendars.{% endif %}</p>
+      <p class="card__subtitle">Each technician's day from {{ "%02d:00" | format(settings.day_start_hour) }} to {{ "%02d:00" | format(settings.day_end_hour) }} ({{ settings.timezone }}). Click an appointment to change it, or an empty spot on a technician's row to book them then.{% if settings.calendar_sync %} Appointments are also written to technicians' Microsoft 365 calendars, and time their calendars show as busy is marked unavailable (without any event details).{% endif %}</p>
     </div></div>
     {% if board.rows %}
     <div class="sch-board" data-sch-board data-start-hour="{{ settings.day_start_hour }}" data-end-hour="{{ settings.day_end_hour }}" data-date="{{ day.isoformat() }}">
@@ -56,6 +56,7 @@
         </span>
         <span class="sch-board__track sch-row__track" style="--sch-lanes: {{ row.lanes }}" data-sch-track>
           {% for hour in board.hours %}<span class="sch-row__gridline" style="left: {{ hour.left }}%" aria-hidden="true"></span>{% endfor %}
+          {% for band in row.busy %}<span class="sch-busy" style="left: {{ band.left }}%; width: {{ band.width }}%" data-sch-busy title="Unavailable · {{ band.when }}"><span class="visually-hidden">{{ row.name }} unavailable {{ band.start_label }}–{{ band.end_label }}</span><span class="sch-busy__label" aria-hidden="true">Unavailable</span></span>{% endfor %}
           {% if board.now_left is not none %}<span class="sch-row__now" style="left: {{ board.now_left }}%" aria-hidden="true"></span>{% endif %}
           {% for item in row["items"] %}
           <a class="sch-block sch-block--{{ item.kind }} sch-block--{{ item.status }}{% if item.sync_status == 'failed' %} sch-block--sync-failed{% endif %}" style="left: {{ item.left }}%; width: {{ item.width }}%; --sch-lane: {{ item.lane }}" href="/admin/schedule?date={{ day.isoformat() }}&amp;appointment={{ item.id }}" title="{{ item.kind_label }} · {{ item.when }} · {{ item.company_name or '' }} · #{{ item.ticket_number or item.ticket_id }} {{ item.ticket_subject or '' }}">
@@ -70,6 +71,7 @@
       <ul class="sch-legend" aria-label="Key">
         {% for key, label in kinds.items() %}<li><span class="sch-legend__swatch sch-block--{{ key }}" aria-hidden="true"></span>{{ label }}</li>{% endfor %}
         <li><span class="sch-legend__swatch sch-block--completed" aria-hidden="true"></span>Done</li>
+        {% if settings.calendar_sync %}<li><span class="sch-legend__swatch sch-legend__swatch--busy" aria-hidden="true"></span>Unavailable in their calendar</li>{% endif %}
       </ul>
     </div>
     {% else %}
@@ -102,6 +104,12 @@
       <h2 class="card__title" id="sch-settings-heading">Scheduling settings</h2>
       <p class="card__subtitle">To write appointments to technicians' Outlook calendars, choose the company whose Microsoft 365 connection holds your technicians' mailboxes (usually your own business). Its app needs the <strong>Calendars.ReadWrite</strong> application permission.</p>
     </div></div>
+    {% if settings.calendar_sync %}
+    <p class="sch-sync {{ 'sch-sync--failed' if busy_sync.busy_sync_error else 'sch-sync--synced' }}" role="status">
+      {% if busy_sync.busy_synced_at %}Technicians' busy time last read <span data-utc="{{ busy_sync.busy_synced_at }}">{{ busy_sync.busy_synced_at }}</span>; they're read every {{ sync_interval_minutes }} minutes.{% else %}Technicians' busy time will be read from their calendars within {{ sync_interval_minutes }} minutes.{% endif %}
+      {% if busy_sync.busy_sync_error %} Problem: {{ busy_sync.busy_sync_error }}{% endif %}
+    </p>
+    {% endif %}
     <form method="post" action="/admin/schedule/settings" class="sch-settings">
       {% include "partials/csrf.html" %}
       <div class="form-field">

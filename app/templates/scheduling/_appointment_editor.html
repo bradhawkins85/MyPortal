@@ -14,12 +14,10 @@
       </div>
       <a href="/admin/schedule?date={{ day.isoformat() }}" class="modal__close" data-modal-close aria-label="Close appointment editor"></a>
     </header>
-    <div class="modal__body scf-editor__body">
+    <div class="modal__body scf-editor__body" data-sch-appointment="{{ e.id or '' }}">
       <div class="scf-editor__main">
         {% if err.conflict %}
-        <div class="alert alert--warning" role="alert">{{ err.conflict }}
-          <label class="sch-anyway"><input type="checkbox" name="book_anyway" value="1"> Book anyway</label>
-        </div>
+        <div class="alert alert--warning" role="alert">{{ err.conflict }}</div>
         {% elif err %}<div class="alert alert--error" role="alert">Check the highlighted fields.</div>{% endif %}
         <div class="scf-grid">
           <div class="form-field">
@@ -67,6 +65,11 @@
           </div>
         </div>
         <p class="form-help">Times are in {{ settings.timezone }}.</p>
+        <div class="sch-avail" data-sch-avail hidden>
+          <p class="form-label sch-avail__title">Already taken that day</p>
+          <ul class="sch-avail__list" data-sch-avail-list></ul>
+          <p class="form-help form-help--error" data-sch-avail-error role="alert" hidden></p>
+        </div>
         <div class="form-field">
           <label class="form-label" for="sch-location">Where <span class="field-optional">optional</span></label>
           <input class="form-input" id="sch-location" name="location" maxlength="500" value="{{ e.location or '' }}" placeholder="e.g. 12 High St, reception" data-sch-input>
@@ -87,7 +90,9 @@
         <ul class="scf-preview__rules">
           <li>The ticket gets an internal note.</li>
           <li>Automations can email the requester.</li>
-          {% if settings.calendar_sync %}<li>It goes in the technician's Outlook calendar.</li>{% endif %}
+          {% if settings.calendar_sync %}<li>It goes in the technician's Outlook calendar.</li>
+          <li>Times their Outlook calendar shows as busy can't be booked.</li>{% endif %}
+          <li>Times already booked for the technician can't be booked again.</li>
         </ul>
       </aside>
     </div>
