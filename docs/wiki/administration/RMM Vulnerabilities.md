@@ -53,6 +53,14 @@ editor: choose whether the program's name *is exactly*, *starts with* or *contai
 **Find in NVD** to pick the product (vendor and product). Your mappings are checked before the
 built-in ones. Saving a mapping requests a sync.
 
+## Reports and status strips
+
+The *Vulnerabilities* category of the [Reporting Catalogue](Reporting%20Catalogue.md#vulnerabilities)
+has status strips for Reports and the Dashboard (NVD and CVE catalogue totals and CVE detections),
+plus reports of assets by vulnerability count, every detection and CVEs by affected devices. Copies
+limited to devices online in the last 30 or 90 days, or offline for over 90 days, show whether
+detections apply to devices still in use. Each has a company scoped copy.
+
 ## API
 
 | Method | Path | Who |
