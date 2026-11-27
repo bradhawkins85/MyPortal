@@ -30,7 +30,7 @@ from app.repositories import companies as company_repo
 from app.repositories import shop as shop_repo
 from app.repositories import subscription_change_requests as change_requests_repo
 from app.repositories import subscriptions as subscriptions_repo
-from app.services import subscription_renewals
+from app.services import subscription_billing, subscription_renewals
 from app.services.voice_monitor_billing import (
     contract_display,
     is_voice_monitor_subscription,
@@ -232,6 +232,9 @@ async def subscriptions_page(request: Request, category: str | None = None):
         if lifecycle_subscriptions
         else {}
     )
+    display_end_dates = await subscription_billing.resolve_display_end_dates(
+        subs, pending_changes_by_subscription
+    )
     renewal_forecast = subscription_renewals.build_renewal_forecast(
         lifecycle_subscriptions,
         today=date.today(),
@@ -260,6 +263,10 @@ async def subscriptions_page(request: Request, category: str | None = None):
         )
         formatted_sub["reminder_due_days"] = reminder_days_lookup.get(
             formatted_sub["id"]
+        )
+        shown_end_date = _coerce_date(display_end_dates.get(formatted_sub["id"]))
+        formatted_sub["display_end_date"] = (
+            shown_end_date.strftime("%Y-%m-%d") if shown_end_date is not None else None
         )
 
     is_super_admin = bool(user.get("is_super_admin"))
