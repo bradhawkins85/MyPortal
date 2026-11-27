@@ -324,3 +324,194 @@ async def test_repository_queries_bind_every_value(monkeypatch):
     await repo.list_unscheduled_tickets(datetime(2026, 1, 1))
     for sql, params in calls:
         assert sql.count("%s") == len(params), sql
+
+
+# --------------------------------------------------------------------------- #
+# Booking kinds and booking from the ticket page
+# --------------------------------------------------------------------------- #
+
+KINDS_MIGRATION = Path("migrations/585_booking_kinds.sql")
+
+
+def _kind_rows():
+    return [
+        {"id": 1, "kind_key": "onsite", "label": "Onsite visit", "tone": "warning", "sort_order": 10, "is_default": False,
+         "is_archived": False, "appointment_count": 3},
+        {"id": 2, "kind_key": "workshop", "label": "Workshop", "tone": "danger", "sort_order": 20, "is_default": True,
+         "is_archived": False, "appointment_count": 0},
+        {"id": 3, "kind_key": "phone", "label": "Phone call", "tone": "success", "sort_order": 30, "is_default": False,
+         "is_archived": True, "appointment_count": 2},
+    ]
+
+
+@pytest.fixture
+def restore_kinds():
+    yield
+    scheduling.KINDS.clear()
+    scheduling.KINDS.update({kind["kind_key"]: kind["label"] for kind in scheduling.DEFAULT_KINDS})
+    scheduling.KIND_TONES.clear()
+    scheduling.KIND_TONES.update({kind["kind_key"]: kind["tone"] for kind in scheduling.DEFAULT_KINDS})
+    scheduling._kind_state.update(active=[kind["kind_key"] for kind in scheduling.DEFAULT_KINDS], default="onsite")
+
+
+def test_kinds_migration_seeds_built_in_kinds_on_sqlite():
+    source = KINDS_MIGRATION.read_text(encoding="utf-8")
+    assert source.startswith("-- phase: expand")
+    connection = sqlite3.connect(":memory:")
+    for statement in db._split_sql_statements(db._adapt_sql_for_sqlite(source)):
+        connection.execute(statement.replace("INSERT IGNORE INTO", "INSERT OR IGNORE INTO"))
+    for statement in db._split_sql_statements(db._adapt_sql_for_sqlite(source)):  # idempotent
+        connection.execute(statement.replace("INSERT IGNORE INTO", "INSERT OR IGNORE INTO"))
+    rows = connection.execute("SELECT kind_key, is_default FROM booking_kinds ORDER BY sort_order").fetchall()
+    assert rows == [("onsite", 1), ("remote", 0), ("phone", 0), ("meeting", 0)]
+
+
+@pytest.mark.asyncio
+async def test_refresh_kinds_uses_stored_kinds_and_default(monkeypatch, restore_kinds):
+    monkeypatch.setattr(repo, "list_kinds", AsyncMock(return_value=_kind_rows()))
+    await scheduling.refresh_kinds()
+    assert scheduling.active_kinds() == {"onsite": "Onsite visit", "workshop": "Workshop"}
+    assert scheduling.default_kind() == "workshop"
+    assert scheduling.kind_label("phone") == "Phone call"  # archived kinds keep their label
+    assert scheduling.editor_state(None, BRISBANE)["kind"] == "workshop"
+    values = scheduling.parse_form(_form(ticket_id="42", technician_user_id="3", date="2026-12-01", start_time="09:00",
+                                         duration_minutes="60"), BRISBANE, technician_ids=[3])
+    assert values["kind"] == "workshop"
+    with pytest.raises(scheduling.AppointmentError) as error:
+        scheduling.parse_form(_form(ticket_id="42", technician_user_id="3", kind="unknown", date="2026-12-01",
+                                    start_time="09:00", duration_minutes="60"), BRISBANE, technician_ids=[3])
+    assert "kind" in error.value.errors
+
+
+@pytest.mark.asyncio
+async def test_refresh_kinds_falls_back_to_built_in_kinds(monkeypatch, restore_kinds):
+    monkeypatch.setattr(repo, "list_kinds", AsyncMock(side_effect=RuntimeError("no table")))
+    rows = await scheduling.refresh_kinds()
+    assert [row["kind_key"] for row in rows] == ["onsite", "remote", "phone", "meeting"]
+    assert scheduling.default_kind() == "onsite"
+
+
+def test_kind_key_and_form():
+    assert scheduling.kind_key_for("Workshop repair!", []) == "workshop-rep"
+    assert scheduling.kind_key_for("Onsite", ["onsite", "onsite-2"]) == "onsite-3"
+    assert scheduling.kind_key_for("???", []) == "kind"
+    assert len(scheduling.kind_key_for("A very long booking kind name", [])) <= 16
+    assert scheduling.parse_kind_form({"label": "  Bench   test ", "tone": "danger", "is_default": "1"}) == {
+        "label": "Bench test", "tone": "danger", "is_default": True}
+    with pytest.raises(scheduling.AppointmentError) as error:
+        scheduling.parse_kind_form({"label": " ", "tone": "pink"})
+    assert set(error.value.errors) == {"label", "tone"}
+
+
+@pytest.mark.asyncio
+async def test_remove_kind_archives_used_kinds_and_protects_the_default(monkeypatch, restore_kinds):
+    from app.features.scheduling import routes
+
+    rows = _kind_rows()
+    monkeypatch.setattr(repo, "list_kinds", AsyncMock(return_value=rows))
+    archive, delete = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(repo, "archive_kind", archive)
+    monkeypatch.setattr(repo, "delete_kind", delete)
+    assert await routes._remove_kind(rows[0]) == "archived"
+    archive.assert_awaited_once_with(1)
+    assert await routes._remove_kind({**rows[0], "appointment_count": 0}) == "deleted"
+    delete.assert_awaited_once_with(1)
+    with pytest.raises(scheduling.AppointmentError):
+        await routes._remove_kind(rows[1])  # the default
+
+
+def test_editor_offers_an_archived_kind_the_appointment_uses(restore_kinds):
+    from app.features.scheduling import routes
+
+    scheduling._kind_state.update(active=["onsite", "remote"])
+    assert "phone" not in routes._editor_kinds(None)
+    assert routes._editor_kinds({"kind": "phone"})["phone"] == "Phone call (archived)"
+
+
+def test_kind_routes_registered():
+    paths = {route.path for router in PACK.routers for route in router.routes}
+    assert {"/admin/schedule/kinds", "/admin/schedule/kinds/{kind_id:int}", "/admin/schedule/kinds/{kind_id:int}/default",
+            "/admin/schedule/kinds/{kind_id:int}/delete", "/api/scheduling/kinds",
+            "/api/scheduling/kinds/{kind_id}"} <= paths
+
+
+@pytest.mark.asyncio
+async def test_kind_routes_require_super_admin(monkeypatch):
+    from fastapi.responses import RedirectResponse
+
+    from app.features.scheduling import routes
+
+    redirect = RedirectResponse("/login")
+    monkeypatch.setattr(routes, "_main", lambda: SimpleNamespace(_require_super_admin_page=AsyncMock(return_value=(None, redirect))))
+    for call in (routes.create_kind(SimpleNamespace()), routes.update_kind(1, SimpleNamespace()),
+                 routes.default_kind(1, SimpleNamespace()), routes.delete_kind(1, SimpleNamespace())):
+        assert await call is redirect
+
+
+@pytest.mark.asyncio
+async def test_kind_queries_bind_every_value(monkeypatch):
+    calls = []
+
+    def record(result):
+        async def capture(sql, params=None):
+            calls.append((sql, tuple(params or ())))
+            return result
+        return capture
+
+    monkeypatch.setattr(db, "fetch_all", record([]))
+    monkeypatch.setattr(db, "fetch_one", record({"top": 40}))
+    monkeypatch.setattr(db, "execute", record(None))
+    monkeypatch.setattr(db, "execute_returning_lastrowid", record(5))
+    await repo.list_kinds()
+    await repo.get_kind(1)
+    assert await repo.create_kind(kind_key="bench", label="Bench", tone="danger", is_default=True) == 5
+    await repo.update_kind(1, label="x", tone="accent")
+    await repo.archive_kind(1)
+    await repo.delete_kind(1)
+    for sql, params in calls:
+        assert sql.count("%s") == len(params), sql
+    assert ("INSERT INTO booking_kinds (kind_key, label, tone, sort_order, is_default, is_archived) "
+            "VALUES (%s, %s, %s, %s, 0, 0)", ("bench", "Bench", "danger", 50)) in calls
+    assert ("UPDATE booking_kinds SET is_default = 1, is_archived = 0 WHERE id = %s", (5,)) in calls
+
+
+def _render(name, **context):
+    import app.main as main_module
+
+    template = main_module.templates.env.get_template(name)
+    return template.render(csrf_token="tok", static_url=lambda path: path, **context)
+
+
+def test_ticket_card_books_in_place_and_returns_to_the_ticket(restore_kinds):
+    ta = {"items": [], "upcoming": 0, "timezone": "UTC", "sync_labels": scheduling.SYNC_LABELS,
+          "statuses": scheduling.STATUSES, "settings": scheduling.Settings(), "day": date(2026, 12, 1),
+          "technicians": [{"id": 3, "name": "Sam Lee"}], "kinds": scheduling.active_kinds(),
+          "default_kind": "remote", "durations": scheduling.DURATIONS,
+          "ticket": {"id": 42, "label": "#T42 Printer jam", "technician_id": 3}, "return_to": "/admin/tickets/42"}
+    html = _render("scheduling/_ticket_appointments.html", ticket_appointments=ta, ticket={"id": 42, "assigned_user_id": 3})
+    assert 'data-sch-open aria-haspopup="dialog" aria-controls="sch-modal"' in html
+    assert 'id="sch-modal"' in html and "hidden data-sch-modal" in html.replace("  ", " ")
+    assert '<input type="hidden" name="return_to" value="/admin/tickets/42">' in html
+    assert '<input type="hidden" name="ticket_id" value="42">' in html
+    assert 'name="kind" value="remote" checked' in html
+    assert '<option value="3" selected>Sam Lee</option>' in html
+    assert 'href="/admin/tickets/42" class="modal__close"' in html
+    assert "/static/js/scheduling.js" in html
+
+
+@pytest.mark.asyncio
+async def test_save_returns_to_the_ticket(monkeypatch):
+    from app.features.scheduling import routes
+
+    user = {"id": 1}
+    form = _form(ticket_id="42", technician_user_id="3", kind="onsite", date="2026-12-01", start_time="09:00",
+                 duration_minutes="60", return_to="/admin/tickets/42")
+    request = SimpleNamespace(form=AsyncMock(return_value=form))
+    monkeypatch.setattr(routes, "_main", lambda: SimpleNamespace(_require_helpdesk_page=AsyncMock(return_value=(user, None))))
+    monkeypatch.setattr(scheduling, "load_settings", AsyncMock(return_value=BRISBANE))
+    monkeypatch.setattr(routes, "_technicians", AsyncMock(return_value=[{"id": 3, "first_name": "Sam"}]))
+    monkeypatch.setattr(scheduling, "conflicts", AsyncMock(return_value=[]))
+    monkeypatch.setattr(scheduling, "save", AsyncMock(return_value=_appointment()))
+    monkeypatch.setattr(routes.audit_service, "log_action", AsyncMock())
+    response = await routes.create_appointment(request)
+    assert response.headers["location"].startswith("/admin/tickets/42")

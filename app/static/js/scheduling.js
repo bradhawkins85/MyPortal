@@ -25,6 +25,8 @@
   }
 
   function ticketLabel() {
+    const fixed = form.querySelector('[data-sch-ticket-label]');
+    if (fixed) return fixed.textContent.trim();
     const value = field('ticket_id').value.trim();
     if (!value) return '';
     const option = form.querySelector(`#sch-ticket-options option[value="${CSS.escape(value)}"]`);
