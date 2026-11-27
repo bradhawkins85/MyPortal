@@ -29,6 +29,7 @@ from app.services.m365 import M365Error
 from app.services.imap import (
     _build_attachment_only_reply_body,
     _add_email_cc_watchers,
+    _inbound_mailbox_addresses,
     _evaluate_filter,
     _extract_domains,
     _extract_email_addresses,
@@ -2008,15 +2009,20 @@ async def sync_account(
                                             else None
                                         ),
                                     )
-                            cc_addresses = _extract_graph_recipient_addresses(
-                                msg.get("ccRecipients") or []
+                            recipient_addresses = _extract_graph_recipient_addresses(
+                                (msg.get("toRecipients") or [])
+                                + (msg.get("ccRecipients") or [])
+                            )
+                            mailbox_addresses = await _inbound_mailbox_addresses(
+                                [upn] if upn else None
                             )
                             await _add_email_cc_watchers(
                                 int(ticket_id),
-                                cc_addresses,
+                                recipient_addresses,
                                 exclude_addresses=(
-                                    [from_email_addr] if from_email_addr else None
-                                ),
+                                    [from_email_addr] if from_email_addr else []
+                                )
+                                + mailbox_addresses,
                             )
                             tickets_service.schedule_ticket_ai_refresh(int(ticket_id))
                 except Exception as exc:  # pragma: no cover - defensive logging

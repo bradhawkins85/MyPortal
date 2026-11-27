@@ -16,10 +16,12 @@ from email.utils import getaddresses, parsedate_to_datetime
 from html import escape
 from typing import Any, Mapping
 
+from app.core.config import get_settings
 from app.core.database import db
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
 from app.repositories import imap_accounts as imap_repo
+from app.repositories import m365_mail_accounts as m365_mail_accounts_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import staff as staff_repo
 from app.repositories import users as users_repo
@@ -94,7 +96,17 @@ def _expand_ticket_external_references(values: list[str] | None) -> list[str]:
     references: list[str] = []
     seen: set[str] = set()
     for value in values or []:
-        for candidate in (value, _normalise_ticket_external_reference(value)):
+        # In-Reply-To/References parsing yields bare ids, while stored ticket
+        # and reply references keep the angle brackets of the original
+        # Message-ID/internetMessageId, so try both forms.
+        bare = _normalise_string(value).strip("<>").strip()
+        forms = [value]
+        if bare:
+            forms.extend([bare, f"<{bare}>"])
+        candidates: list[str | None] = []
+        for form in forms:
+            candidates.extend([form, _normalise_ticket_external_reference(form)])
+        for candidate in candidates:
             reference = _normalise_string(candidate)
             if reference and reference not in seen:
                 references.append(reference)
@@ -462,17 +474,51 @@ def _build_attachment_only_reply_body(
         f"available after sanitisation.{detail_html}</p>"
     )
 
+async def _inbound_mailbox_addresses(
+    account_addresses: list[str] | None = None,
+) -> list[str]:
+    """Return the portal's own mailbox addresses.
+
+    The receiving mailbox is normally on the To line of a new request. These
+    addresses must never become ticket watchers, otherwise ticket notifications
+    would be delivered back into a monitored mailbox and re-imported.
+    """
+
+    addresses: set[str] = set()
+    for value in account_addresses or []:
+        addresses.update(_extract_email_addresses(value))
+    settings = get_settings()
+    for value in (settings.smtp_from, settings.smtp_user):
+        addresses.update(_extract_email_addresses(value))
+    try:
+        for account in await imap_repo.list_accounts():
+            addresses.update(_extract_email_addresses(account.get("username")))
+    except Exception:  # pragma: no cover - defensive lookup
+        pass
+    try:
+        for account in await m365_mail_accounts_repo.list_accounts():
+            addresses.update(
+                _extract_email_addresses(account.get("user_principal_name"))
+            )
+    except Exception:  # pragma: no cover - defensive lookup
+        pass
+    return sorted(address for address in addresses if "@" in address)
+
+
 async def _add_email_cc_watchers(
     ticket_id: int,
     cc_addresses: list[str],
     *,
     exclude_addresses: list[str] | None = None,
 ) -> None:
-    """Add original email CC recipients as email-only ticket watchers.
+    """Add original email To/Cc recipients as email-only ticket watchers.
 
-    Inbound mail often includes interested customer contacts in Cc.  Persisting
-    them as email-only watchers allows future ticket notifications to include
-    the same audience.  Cc headers are attacker-controlled, so they must not be
+    Inbound mail often includes interested contacts in To or Cc alongside the
+    support mailbox.  Persisting them as email-only watchers allows future
+    ticket notifications to include the same audience.  Callers must exclude
+    the sender and the portal's own mailboxes (see
+    :func:`_inbound_mailbox_addresses`).  Recipient headers are
+    attacker-controlled, so they must not be
     resolved to portal user ids here: user_id watcher rows are authorization
     principals and can grant ticket access.
     """
@@ -2121,11 +2167,23 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     is_new_ticket = True
                     ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
                     if ticket_id is not None:
-                        cc_addresses = _extract_email_addresses(message.get("Cc"))
+                        recipient_addresses = _extract_email_addresses(
+                            ", ".join(
+                                str(header)
+                                for header in message.get_all("To", [])
+                                + message.get_all("Cc", [])
+                            )
+                        )
+                        mailbox_addresses = await _inbound_mailbox_addresses(
+                            [username] if username else None
+                        )
                         await _add_email_cc_watchers(
                             int(ticket_id),
-                            cc_addresses,
-                            exclude_addresses=[from_email_addr] if from_email_addr else None,
+                            recipient_addresses,
+                            exclude_addresses=(
+                                [from_email_addr] if from_email_addr else []
+                            )
+                            + mailbox_addresses,
                         )
                         tickets_service.schedule_ticket_ai_refresh(int(ticket_id))
             except Exception as exc:  # pragma: no cover - defensive logging

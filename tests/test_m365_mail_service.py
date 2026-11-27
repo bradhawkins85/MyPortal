@@ -2041,3 +2041,106 @@ async def test_sync_account_runs_automations_after_saving_attachments(
     assert events == expected_events
     if not is_reply:
         assert created_tickets[0]["trigger_automations"] is False
+
+
+async def test_sync_account_adds_to_and_cc_recipients_as_watchers_except_mailbox(monkeypatch):
+    """A new ticket watches every To/Cc contact except the sender and the portal mailboxes.
+
+    Regression: a customer emailed support with an external contact on the To
+    line; only Cc recipients were added, so the contact's reply-all opened a
+    second, unrelated ticket.
+    """
+    watcher_calls: list[tuple[int, list[str], list[str]]] = []
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        return {"enabled": True}
+
+    async def fake_get_account(account_id: int):
+        return {
+            "id": 1,
+            "active": True,
+            "company_id": 5,
+            "user_principal_name": "Support@MSP.example",
+            "folder": "Inbox",
+            "process_unread_only": True,
+            "mark_as_read": False,
+            "filter_query": None,
+            "sync_known_only": False,
+        }
+
+    async def fake_acquire_token(company_id, **kwargs):
+        return "fake-token"
+
+    async def fake_graph_get(access_token: str, url: str):
+        return {
+            "value": [
+                {
+                    "id": "msg-intro",
+                    "internetMessageId": "<intro@customer.example>",
+                    "subject": "Introduction: Partner and MSP",
+                    "body": {"contentType": "html", "content": "<p>Hi both</p>"},
+                    "from": {"emailAddress": {"address": "manager@customer.example"}},
+                    "toRecipients": [
+                        {"emailAddress": {"address": "Partner@Partner.example"}},
+                        {"emailAddress": {"address": "support@msp.example"}},
+                    ],
+                    "ccRecipients": [
+                        {"emailAddress": {"address": "colleague@customer.example"}},
+                    ],
+                    "bccRecipients": [],
+                    "replyTo": [],
+                    "isRead": False,
+                    "receivedDateTime": "2026-11-27T09:40:00Z",
+                    "hasAttachments": False,
+                    "internetMessageHeaders": [],
+                },
+            ],
+        }
+
+    async def fake_none(*_args, **_kwargs):
+        return None
+
+    async def fake_resolve_ticket_entities(from_header, *, default_company_id=None):
+        return 5, 42
+
+    async def fake_create_ticket(**kwargs):
+        return {"id": 300, "ticket_number": "T-300"}
+
+    async def fake_record_message(**kwargs):
+        return True
+
+    async def fake_mailbox_addresses(account_addresses=None):
+        return sorted({a.lower() for a in account_addresses or []} | {"alerts@msp.example"})
+
+    async def fake_add_watchers(ticket_id, addresses, *, exclude_addresses=None):
+        watcher_calls.append((ticket_id, list(addresses), list(exclude_addresses or [])))
+
+    monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_message", fake_none)
+    monkeypatch.setattr(m365_mail.mail_repo, "upsert_message", fake_none)
+    monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_none)
+    monkeypatch.setattr(m365_mail, "_record_message", fake_record_message)
+    monkeypatch.setattr(m365_mail, "_resolve_ticket_entities", fake_resolve_ticket_entities)
+    monkeypatch.setattr(m365_mail, "_find_existing_ticket_for_reply", fake_none)
+    monkeypatch.setattr(m365_mail, "_inbound_mailbox_addresses", fake_mailbox_addresses)
+    monkeypatch.setattr(m365_mail, "_add_email_cc_watchers", fake_add_watchers)
+    monkeypatch.setattr(m365_mail.tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(m365_mail.tickets_service, "schedule_ticket_ai_refresh", lambda *_a, **_k: None)
+    monkeypatch.setattr(m365_mail.tickets_service, "emit_ticket_created_event", fake_none)
+
+    result = await m365_mail.sync_account(1)
+
+    assert result.get("errors") == [], result
+    assert len(watcher_calls) == 1
+    ticket_id, addresses, excluded = watcher_calls[0]
+    assert ticket_id == 300
+    assert addresses == [
+        "partner@partner.example",
+        "support@msp.example",
+        "colleague@customer.example",
+    ]
+    assert "manager@customer.example" in excluded
+    assert "support@msp.example" in excluded

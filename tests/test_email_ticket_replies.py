@@ -730,6 +730,87 @@ async def test_add_email_cc_watchers_adds_email_only_watchers(monkeypatch):
 
 
 
+def test_expand_external_references_matches_bracketed_stored_message_ids():
+    """Header parsing strips angle brackets; stored Message-IDs keep them."""
+    from app.services.imap import (
+        _expand_ticket_external_references,
+        _extract_message_ids,
+        _normalise_ticket_external_reference,
+    )
+
+    parsed = _extract_message_ids("<intro@customer.example>")
+    assert parsed == ["intro@customer.example"]
+    expanded = _expand_ticket_external_references(parsed)
+    assert "<intro@customer.example>" in expanded
+
+    long_id = "<" + "a" * 200 + "@customer.example>"
+    expanded_long = _expand_ticket_external_references(_extract_message_ids(long_id))
+    assert _normalise_ticket_external_reference(long_id) in expanded_long
+
+
+@pytest.mark.anyio
+async def test_find_existing_ticket_for_reply_matches_reply_all_from_external_contact(monkeypatch):
+    """An external contact's reply-all threads onto the original ticket by In-Reply-To."""
+    from app.services import imap
+
+    looked_up: list[str] = []
+
+    async def fake_get_ticket_by_external_reference(reference: str):
+        looked_up.append(reference)
+        if reference == "<intro@customer.example>":
+            return {"id": 77, "status": "open", "external_reference": reference}
+        return None
+
+    async def fake_fetch_all(_query: str, _params: tuple[object, ...]):
+        return []
+
+    monkeypatch.setattr(
+        imap.tickets_repo,
+        "get_ticket_by_external_reference",
+        fake_get_ticket_by_external_reference,
+    )
+    monkeypatch.setattr(imap.db, "fetch_all", fake_fetch_all)
+
+    ticket = await imap._find_existing_ticket_for_reply(
+        "Re: Introduction: Partner and MSP",
+        "partner@partner.example",
+        related_message_ids=imap._extract_message_ids("<intro@customer.example>"),
+    )
+
+    assert ticket is not None
+    assert ticket["id"] == 77
+
+
+@pytest.mark.anyio
+async def test_inbound_mailbox_addresses_lists_portal_mailboxes(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services import imap
+
+    async def fake_imap_accounts():
+        return [{"username": "Helpdesk@MSP.example"}, {"username": "not-an-email"}]
+
+    async def fake_m365_accounts():
+        return [{"user_principal_name": "support@msp.example"}]
+
+    monkeypatch.setattr(imap.imap_repo, "list_accounts", fake_imap_accounts)
+    monkeypatch.setattr(imap.m365_mail_accounts_repo, "list_accounts", fake_m365_accounts)
+    monkeypatch.setattr(
+        imap,
+        "get_settings",
+        lambda: SimpleNamespace(smtp_from="Portal <noreply@msp.example>", smtp_user=None),
+    )
+
+    addresses = await imap._inbound_mailbox_addresses(["Current@MSP.example"])
+
+    assert addresses == [
+        "current@msp.example",
+        "helpdesk@msp.example",
+        "noreply@msp.example",
+        "support@msp.example",
+    ]
+
+
 def test_extract_body_embeds_url_encoded_content_id_image():
     """Inline images referenced by URL-encoded cid values should render in ticket bodies."""
     from email.message import EmailMessage
