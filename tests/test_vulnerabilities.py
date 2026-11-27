@@ -230,6 +230,38 @@ async def test_match_findings_opens_refreshes_accepts_and_resolves(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_match_findings_handles_the_same_program_twice_on_one_device(monkeypatch):
+    # Two installs of one program (e.g. per-user and machine-wide) share a finding key.
+    software = [
+        {"agent_id": 1, "name": "Google Chrome", "version": "119.0.1", "company_id": 5, "asset_id": 11, "source": "machine"},
+        {"agent_id": 1, "name": "Google Chrome", "version": "118.0", "company_id": 5, "asset_id": 11, "source": "user"},
+        {"agent_id": 2, "name": "Google Chrome", "version": "119.0", "company_id": 5, "asset_id": 12, "source": "machine"},
+        {"agent_id": 2, "name": "Google Chrome", "version": "118.0", "company_id": 5, "asset_id": 12, "source": "user"},
+    ]
+    monkeypatch.setattr(repo, "list_mappings", AsyncMock(return_value=[]))
+    monkeypatch.setattr(repo, "list_installed_software", AsyncMock(return_value=software))
+    monkeypatch.setattr(repo, "list_product_ranges", AsyncMock(return_value={("google", "chrome"): [
+        {"cve_id": "CVE-2025-1", "end_excluding": "120.0"},
+    ]}))
+    monkeypatch.setattr(repo, "list_exceptions", AsyncMock(return_value=[]))
+    monkeypatch.setattr(repo, "list_finding_keys", AsyncMock(return_value={
+        (2, "CVE-2025-1", "Google Chrome"): {"id": 100, "status": "open"},
+    }))
+    inserts, refreshes, resolves = AsyncMock(), AsyncMock(), AsyncMock()
+    monkeypatch.setattr(repo, "insert_findings", inserts)
+    monkeypatch.setattr(repo, "refresh_findings", refreshes)
+    monkeypatch.setattr(repo, "resolve_findings", resolves)
+    monkeypatch.setattr(repo, "update_state", AsyncMock())
+
+    result = await vulns.match_findings(NOW)
+
+    assert result == {"new": 1, "still_open": 1, "resolved": 0}
+    assert [(row[0], row[3]) for row in inserts.await_args.args[0]] == [(1, "CVE-2025-1")]
+    assert [row[-1] for row in refreshes.await_args.args[0]] == [100]
+    assert resolves.await_args.args[0] == []
+
+
+@pytest.mark.asyncio
 async def test_distribution_packages_are_left_out(monkeypatch):
     lister = AsyncMock(return_value=[])
     monkeypatch.setattr(repo, "list_installed_software", lister)

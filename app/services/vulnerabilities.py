@@ -465,6 +465,7 @@ async def match_findings(now: datetime | None = None) -> dict[str, int]:
     exceptions = await repo.list_exceptions()
     existing = await repo.list_finding_keys()
     seen: set[int] = set()
+    queued: set[tuple[int, str, str]] = set()
     inserts: list[tuple[Any, ...]] = []
     refreshes: list[tuple[Any, ...]] = []
     for row in software:
@@ -481,12 +482,12 @@ async def match_findings(now: datetime | None = None) -> dict[str, int]:
                 if int(current["id"]) not in seen:
                     seen.add(int(current["id"]))
                     refreshes.append((row.get("asset_id"), row.get("company_id"), version, status, now, current["id"]))
-            else:
-                existing[key] = {"id": None}
+            elif key not in queued:
+                queued.add(key)
                 inserts.append((key[0], row.get("asset_id"), row.get("company_id"), cve_id, row["vendor"],
                                 row["product"], key[2], version, status, now, now))
     resolved = [int(item["id"]) for item in existing.values()
-                if item.get("id") is not None and int(item["id"]) not in seen and item.get("status") != "resolved"]
+                if int(item["id"]) not in seen and item.get("status") != "resolved"]
     await repo.insert_findings(inserts)
     await repo.refresh_findings(refreshes)
     await repo.resolve_findings(resolved, now)
