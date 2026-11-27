@@ -15,82 +15,30 @@
  *   </div>
  *
  * Storage:
- *   - localStorage cache under "myportal:tables:<table-id>:columns"
- *     value is JSON {"hidden": ["key1","key2"]}
- *   - When authenticated (CSRF token present), preferences are also synced
- *     to GET/PUT /api/users/me/preferences?key=tables:<table-id>:columns.
+ *   - Saved per user in the database through MyPortalViewPrefs
+ *     (view_preferences.js) under "tables:<table-id>:columns", value
+ *     {"hidden": ["key1","key2"]}, so the layout follows the user between
+ *     devices. A layout this browser saved under the old localStorage key
+ *     "myportal:tables:<table-id>:columns" is transferred on first use.
  */
 (function () {
   'use strict';
 
-  var STORAGE_PREFIX = 'myportal:tables:';
-  var API_BASE = '/api/users/me/preferences';
+  var LEGACY_PREFIX = 'myportal:tables:';
 
-  function storageKey(tableId) {
-    return STORAGE_PREFIX + tableId + ':columns';
+  function legacyStorageKey(tableId) {
+    return LEGACY_PREFIX + tableId + ':columns';
   }
 
   function preferenceKey(tableId) {
     return 'tables:' + tableId + ':columns';
   }
 
-  function readLocal(tableId) {
-    try {
-      var raw = window.localStorage.getItem(storageKey(tableId));
-      if (!raw) return null;
-      var parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.hidden)) {
-        return { hidden: parsed.hidden.filter(function (k) { return typeof k === 'string'; }) };
-      }
-    } catch (err) {
-      /* ignore */
+  function normaliseHidden(value) {
+    if (value && Array.isArray(value.hidden)) {
+      return { hidden: value.hidden.filter(function (k) { return typeof k === 'string'; }) };
     }
     return null;
-  }
-
-  function writeLocal(tableId, hidden) {
-    try {
-      window.localStorage.setItem(storageKey(tableId), JSON.stringify({ hidden: hidden }));
-    } catch (err) {
-      /* quota or disabled — non-fatal */
-    }
-  }
-
-  function isAuthenticated() {
-    return !!document.querySelector('meta[name="csrf-token"]');
-  }
-
-  function fetchRemote(tableId) {
-    if (!isAuthenticated() || typeof window.fetch !== 'function') {
-      return Promise.resolve(null);
-    }
-    return window.fetch(API_BASE + '?key=' + encodeURIComponent(preferenceKey(tableId)), {
-      credentials: 'same-origin',
-      headers: { 'Accept': 'application/json' },
-    })
-      .then(function (resp) {
-        if (!resp.ok) return null;
-        return resp.json();
-      })
-      .then(function (data) {
-        if (data && data.value && Array.isArray(data.value.hidden)) {
-          return { hidden: data.value.hidden.filter(function (k) { return typeof k === 'string'; }) };
-        }
-        return null;
-      })
-      .catch(function () { return null; });
-  }
-
-  function pushRemote(tableId, hidden) {
-    if (!isAuthenticated() || typeof window.fetch !== 'function') {
-      return;
-    }
-    window.fetch(API_BASE, {
-      method: 'PUT',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({ key: preferenceKey(tableId), value: { hidden: hidden } }),
-    }).catch(function () { /* non-fatal */ });
   }
 
   function applyVisibility(table, hiddenSet) {
@@ -126,16 +74,18 @@
     return defaults;
   }
 
-  function setToHiddenSet(table, panel, prefs) {
+  function hiddenSetFrom(prefs) {
     var hiddenSet = {};
-    if (prefs && Array.isArray(prefs.hidden)) {
-      prefs.hidden.forEach(function (key) { hiddenSet[key] = true; });
-    } else {
-      hiddenSet = defaultsFor(panel);
-    }
+    (prefs && Array.isArray(prefs.hidden) ? prefs.hidden : []).forEach(function (key) {
+      hiddenSet[key] = true;
+    });
+    return hiddenSet;
+  }
+
+  function render(table, panel, prefs) {
+    var hiddenSet = hiddenSetFrom(prefs);
     applyVisibility(table, hiddenSet);
     syncCheckboxes(panel, hiddenSet);
-    return hiddenSet;
   }
 
   function collectHidden(panel) {
@@ -149,59 +99,58 @@
     return hidden;
   }
 
-  function bindPanel(table, panel, tableId) {
+  function bindPanel(table, panel, pref) {
     if (!panel || panel.__columnPickerBound) return;
     panel.__columnPickerBound = true;
 
     panel.addEventListener('change', function (event) {
       var input = event.target.closest('[data-table-column-toggle]');
       if (!input) return;
-      var hidden = collectHidden(panel);
-      var hiddenSet = {};
-      hidden.forEach(function (k) { hiddenSet[k] = true; });
-      applyVisibility(table, hiddenSet);
-      writeLocal(tableId, hidden);
-      pushRemote(tableId, hidden);
+      var prefs = { hidden: collectHidden(panel) };
+      applyVisibility(table, hiddenSetFrom(prefs));
+      pref.save(prefs);
     });
 
     var resetBtn = panel.querySelector('[data-table-columns-reset]');
     if (resetBtn) {
       resetBtn.addEventListener('click', function (event) {
         event.preventDefault();
-        var defaults = defaultsFor(panel);
-        var hidden = Object.keys(defaults).filter(function (k) { return defaults[k]; });
-        applyVisibility(table, defaults);
-        syncCheckboxes(panel, defaults);
-        writeLocal(tableId, hidden);
-        pushRemote(tableId, hidden);
+        render(table, panel, pref.reset());
       });
     }
   }
 
   function initTable(table) {
     if (table.__columnVisibilityBound) return;
-    table.__columnVisibilityBound = true;
     var tableId = table.getAttribute('data-table-id');
     if (!tableId) return;
     var picker = document.querySelector('[data-table-columns="' + tableId + '"]');
     var panel = picker ? picker.querySelector('[data-table-columns-panel]') : null;
+    // Tables without a column picker have no layout to remember.
+    if (!panel || !window.MyPortalViewPrefs) return;
+    table.__columnVisibilityBound = true;
 
-    var local = readLocal(tableId);
-    var hiddenSet = setToHiddenSet(table, panel, local);
-    bindPanel(table, panel, tableId);
+    var defaultHidden = defaultsFor(panel);
+    var defaults = {
+      hidden: Object.keys(defaultHidden).filter(function (k) { return defaultHidden[k]; }),
+    };
 
-    // Reconcile with server-side preferences asynchronously.
-    fetchRemote(tableId).then(function (remote) {
-      if (!remote) return;
-      // If remote differs from local, prefer remote and update cache.
-      var currentHidden = Object.keys(hiddenSet).filter(function (k) { return hiddenSet[k]; }).sort();
-      var remoteHidden = (remote.hidden || []).slice().sort();
-      if (currentHidden.join('|') === remoteHidden.join('|')) {
-        return;
-      }
-      setToHiddenSet(table, panel, remote);
-      writeLocal(tableId, remote.hidden || []);
+    var pref = window.MyPortalViewPrefs.bind({
+      key: preferenceKey(tableId),
+      defaults: defaults,
+      normalise: normaliseHidden,
+      equals: function (a, b) {
+        return window.MyPortalViewPrefs.sameMembers(a && a.hidden, b && b.hidden);
+      },
+      legacy: function () {
+        return window.MyPortalViewPrefs.readLegacyJson(legacyStorageKey(tableId));
+      },
+      legacyKeys: [legacyStorageKey(tableId)],
+      apply: function (prefs) { render(table, panel, prefs); },
     });
+
+    render(table, panel, pref.initial);
+    bindPanel(table, panel, pref);
   }
 
   function init() {

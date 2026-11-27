@@ -1,32 +1,8 @@
 (function () {
-  const STORAGE_KEY = 'portal.assets.columns';
-
-  function loadVisibleColumns(defaultColumns) {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw === null) {
-        return defaultColumns;
-      }
-      const stored = JSON.parse(raw);
-      // A list holding only the locked "name" column was persisted on first load by an
-      // earlier bug, so treat it like no preference rather than hiding every column.
-      const onlyLockedColumn = stored.length === 1 && stored[0] === 'name';
-      if (Array.isArray(stored) && stored.length > 0 && !onlyLockedColumn && stored.every((item) => typeof item === 'string')) {
-        return stored;
-      }
-    } catch (err) {
-      console.warn('Failed to read stored asset column preferences', err);
-    }
-    return defaultColumns;
-  }
-
-  function saveVisibleColumns(columns) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(columns));
-    } catch (err) {
-      console.warn('Failed to persist asset column preferences', err);
-    }
-  }
+  // Saved per user in the database (see view_preferences.js); the old
+  // browser-only key is transferred the first time the page loads.
+  const PREFERENCE_KEY = 'tables:assets:visible-columns';
+  const LEGACY_STORAGE_KEY = 'portal.assets.columns';
 
   function setColumnVisibility(table, column, visible) {
     if (!table) {
@@ -158,7 +134,7 @@
     const panel = container.querySelector('[data-columns-panel]');
     const toggles = Array.from(container.querySelectorAll('.asset-column-toggle'));
 
-    if (!toggleButton || !panel || toggles.length === 0) {
+    if (!toggleButton || !panel || toggles.length === 0 || !window.MyPortalViewPrefs) {
       return;
     }
 
@@ -196,23 +172,31 @@
       }
     });
 
-    const defaultColumns = toggles.map((input) => input.dataset.column).filter(Boolean);
-    let visibleColumns = loadVisibleColumns(defaultColumns);
-    if (!visibleColumns.includes('name')) {
-      visibleColumns.push('name');
+    function renderColumns(columns) {
+      toggles.forEach((input) => {
+        const column = input.dataset.column;
+        if (!column) {
+          return;
+        }
+        const shouldShow = column === 'name' || columns.includes(column);
+        input.checked = shouldShow || input.disabled;
+        setColumnVisibility(table, column, shouldShow);
+      });
     }
 
-    toggles.forEach((input) => {
-      const column = input.dataset.column;
-      if (!column) {
-        return;
-      }
-      const shouldShow = column === 'name' || visibleColumns.includes(column);
-      input.checked = shouldShow || input.disabled;
-      setColumnVisibility(table, column, shouldShow);
+    const defaultColumns = toggles.map((input) => input.dataset.column).filter(Boolean);
+    const preference = window.MyPortalViewPrefs.bindVisibleColumns({
+      key: PREFERENCE_KEY,
+      defaults: defaultColumns,
+      available: defaultColumns,
+      required: 'name',
+      legacyKey: LEGACY_STORAGE_KEY,
+      // A list holding only the locked "name" column was persisted on first
+      // load by an earlier bug, so treat it like no preference.
+      legacyValid: (stored) => !(stored.length === 1 && stored[0] === 'name'),
+      apply: renderColumns,
     });
-
-    saveVisibleColumns(visibleColumns);
+    renderColumns(preference.initial);
 
     toggles.forEach((input) => {
       input.addEventListener('change', () => {
@@ -231,7 +215,7 @@
         if (!selected.includes('name')) {
           selected.push('name');
         }
-        saveVisibleColumns(selected);
+        preference.save(selected);
         setColumnVisibility(table, column, input.checked);
       });
     });

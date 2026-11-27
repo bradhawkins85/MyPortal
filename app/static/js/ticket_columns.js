@@ -1,33 +1,12 @@
 (function () {
   'use strict';
 
-  const STORAGE_KEY = 'portal.tickets.columns';
+  // Saved per user in the database (see view_preferences.js); the old
+  // browser-only key is transferred the first time the page loads.
+  const PREFERENCE_KEY = 'tables:tickets:visible-columns';
+  const LEGACY_STORAGE_KEY = 'portal.tickets.columns';
   let columnController = null;
   let pendingVisibleColumns = null;
-
-  function loadVisibleColumns(defaultColumns) {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw === null) {
-        return defaultColumns;
-      }
-      const stored = JSON.parse(raw);
-      if (Array.isArray(stored) && stored.length > 0 && stored.every((item) => typeof item === 'string')) {
-        return stored;
-      }
-    } catch (err) {
-      console.warn('Failed to read stored ticket column preferences', err);
-    }
-    return defaultColumns;
-  }
-
-  function saveVisibleColumns(columns) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(columns));
-    } catch (err) {
-      console.warn('Failed to persist ticket column preferences', err);
-    }
-  }
 
   function setColumnVisibility(table, column, visible) {
     if (!table) {
@@ -48,7 +27,7 @@
     const panel = container.querySelector('[data-columns-panel]');
     const toggles = Array.from(container.querySelectorAll('.ticket-column-toggle'));
 
-    if (!toggleButton || !panel || toggles.length === 0) {
+    if (!toggleButton || !panel || toggles.length === 0 || !window.MyPortalViewPrefs) {
       return;
     }
 
@@ -97,7 +76,7 @@
       return [...new Set(selected)];
     }
 
-    function applyVisibleColumns(columns, persist = true) {
+    function renderColumns(columns) {
       const visibleColumns = normaliseColumns(columns);
       toggles.forEach((input) => {
         const column = input.dataset.column;
@@ -105,7 +84,23 @@
         input.checked = shouldShow;
         setColumnVisibility(table, column, shouldShow);
       });
-      if (persist) saveVisibleColumns(visibleColumns);
+      return visibleColumns;
+    }
+
+    const viewLayoutApplied = Array.isArray(pendingVisibleColumns);
+    const preference = window.MyPortalViewPrefs.bindVisibleColumns({
+      key: PREFERENCE_KEY,
+      defaults: defaultColumns,
+      available: availableColumns,
+      required: 'subject',
+      legacyKey: LEGACY_STORAGE_KEY,
+      // A saved view chosen before the stored layout loaded takes priority.
+      apply: (columns) => { if (!viewLayoutApplied) renderColumns(columns); },
+    });
+
+    function applyVisibleColumns(columns, persist = true) {
+      const visibleColumns = renderColumns(columns);
+      if (persist) preference.save(visibleColumns);
       return visibleColumns;
     }
 
@@ -115,7 +110,7 @@
       },
       applyVisibleColumns
     };
-    applyVisibleColumns(pendingVisibleColumns || loadVisibleColumns(defaultColumns), false);
+    applyVisibleColumns(pendingVisibleColumns || preference.initial, false);
     pendingVisibleColumns = null;
 
     toggles.forEach((input) => {

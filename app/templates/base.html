@@ -29,6 +29,7 @@
     data-enable-auto-refresh="{{ 'true' if enable_auto_refresh else 'false' }}"
     data-low-stock-threshold="{{ low_stock_threshold | default(5) }}"
     data-super-admin="{{ 'true' if current_user and current_user.is_super_admin else 'false' }}"
+    {% if current_user is defined and current_user and current_user.get('id') %}data-user-id="{{ current_user.get('id') }}"{% endif %}
   >
     {% set has_authenticated_user = current_user is defined and current_user and current_user.get('id') %}
     {% if policies_update_pending and has_authenticated_user %}
@@ -1638,6 +1639,7 @@
     <script src="{{ static_url('/static/js/pwa.js') }}" defer></script>
     <script src="{{ static_url('/static/js/viewport.js') }}" defer></script>
     <script src="{{ static_url('/static/js/header_menu.js') }}" defer></script>
+    <script src="{{ static_url('/static/js/view_preferences.js') }}" defer></script>
     <script src="{{ static_url('/static/js/table_columns.js') }}" defer></script>
     <script src="{{ static_url('/static/js/searchable_select.js') }}" defer></script>
     <script src="{{ static_url('/static/js/ai_rating.js') }}" defer></script>
