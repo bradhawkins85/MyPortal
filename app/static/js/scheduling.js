@@ -3,6 +3,10 @@
 // that technician and time (to the nearest 15 minutes); "+ Book appointment"
 // opens it blank. The editor writes a plain-English summary as it is filled
 // in. Without JavaScript the links load the page with the editor open.
+// The editor lists the time the chosen technician is already taken that day
+// (other appointments, and busy time from their Outlook calendar, which shows
+// no event details) and won't let a booking over it be saved; the server
+// refuses it too.
 (function () {
   'use strict';
 
@@ -53,12 +57,99 @@
     lastTrigger = trigger || null;
     modal.hidden = false;
     describe();
+    loadTaken();
     const first = field('ticket_id').value ? field('technician_user_id') : field('ticket_id');
     if (first) first.focus();
   }
 
+  // ---- Availability -------------------------------------------------------
+  const avail = form.querySelector('[data-sch-avail]');
+  const availList = form.querySelector('[data-sch-avail-list]');
+  const availError = form.querySelector('[data-sch-avail-error]');
+  const submit = form.querySelector('.modal__footer button[type="submit"]:not([form])');
+  const appointmentId = (form.querySelector('[data-sch-appointment]') || { getAttribute: () => '' }).getAttribute('data-sch-appointment');
+  const cache = new Map();
+  let taken = [];
+  let requestKey = '';
+
+  const toMinutes = (text) => {
+    const match = /^(\d{2}):(\d{2})/.exec(text || '');
+    return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+  };
+
+  function checkSlot() {
+    const startField = field('start_time');
+    const start = toMinutes(startField.value);
+    const duration = Number(field('duration_minutes').value || 0);
+    let clash = null;
+    if (start !== null && duration > 0) {
+      const end = start + duration;
+      clash = taken.find((range) => start < toMinutes(range.end) && end > toMinutes(range.start)) || null;
+    }
+    const message = clash
+      ? 'That time is taken (' + clash.start + '–' + clash.end + ', '
+        + (clash.source === 'calendar' ? 'busy in their calendar' : 'another appointment') + '). Choose another time.'
+      : '';
+    startField.setCustomValidity(message);
+    if (availError) {
+      availError.textContent = message;
+      availError.hidden = !message;
+    }
+    if (submit) submit.disabled = Boolean(message);
+  }
+
+  function renderTaken() {
+    if (!avail) return;
+    availList.replaceChildren();
+    taken.forEach((range) => {
+      const item = document.createElement('li');
+      const pill = document.createElement('span');
+      pill.className = 'status ' + (range.source === 'calendar' ? 'status--neutral' : 'status--info');
+      pill.textContent = range.start + '–' + range.end + ' · ' + (range.source === 'calendar' ? 'Unavailable' : 'Booked');
+      item.appendChild(pill);
+      availList.appendChild(item);
+    });
+    avail.hidden = taken.length === 0;
+    checkSlot();
+  }
+
+  async function loadTaken() {
+    const technician = field('technician_user_id').value;
+    const day = field('date').value;
+    const key = technician && day ? technician + '|' + day : '';
+    requestKey = key;
+    if (!key) {
+      taken = [];
+      renderTaken();
+      return;
+    }
+    if (!cache.has(key)) {
+      const params = new URLSearchParams({ technician_id: technician, date: day });
+      if (appointmentId) params.set('exclude', appointmentId);
+      try {
+        const response = await fetch('/api/scheduling/availability?' + params.toString(),
+          { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        if (!response.ok) throw new Error(String(response.status));
+        cache.set(key, (await response.json()).unavailable || []);
+      } catch (error) {
+        cache.set(key, []); // the server still refuses a clash when the form is saved
+      }
+    }
+    if (requestKey !== key) return; // a later choice superseded this one
+    taken = cache.get(key) || [];
+    renderTaken();
+  }
+
   form.addEventListener('input', describe);
   form.addEventListener('change', describe);
+  form.addEventListener('change', (event) => {
+    const name = event.target && event.target.name;
+    if (name === 'technician_user_id' || name === 'date') loadTaken();
+    else if (name === 'start_time' || name === 'duration_minutes') checkSlot();
+  });
+  form.addEventListener('input', (event) => {
+    if (event.target && event.target.name === 'start_time') checkSlot();
+  });
 
   const isNew = form.getAttribute('action') === '/admin/schedule/appointments';
   document.querySelectorAll('[data-sch-open]').forEach((trigger) => {
@@ -72,7 +163,7 @@
   // Click an empty spot on a technician's row to book them then.
   document.querySelectorAll('[data-sch-track]').forEach((track) => {
     track.addEventListener('click', (event) => {
-      if (event.target.closest('a')) return;
+      if (event.target.closest('a') || event.target.closest('[data-sch-busy]')) return;
       const board = track.closest('[data-sch-board]');
       const row = track.closest('[data-sch-row]');
       const rect = track.getBoundingClientRect();

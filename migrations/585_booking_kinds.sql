@@ -2,7 +2,7 @@
 -- compatible-from: *
 -- compatible-to: *
 -- maintenance: false
--- Migration 584: booking kinds for technician appointments.
+-- Migration 585: booking kinds for technician appointments.
 --
 -- booking_kinds replaces the fixed list of appointment kinds (onsite visit,
 -- remote session, phone call, meeting) so admins can add, rename and remove

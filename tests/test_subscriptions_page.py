@@ -49,6 +49,24 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(scheduler_service, "run_system_update", fake_run_system_update)
 
 
+@pytest.fixture(autouse=True)
+def recurring_items(monkeypatch):
+    """Recurring invoice items returned for the subscription end-date lookup."""
+    items: list[dict] = []
+
+    async def fake_list_items_for_company_ids(company_ids):
+        return items
+
+    from app.repositories import company_recurring_invoice_items as recurring_items_repo
+
+    monkeypatch.setattr(
+        recurring_items_repo,
+        "list_items_for_company_ids",
+        fake_list_items_for_company_ids,
+    )
+    return items
+
+
 @pytest.fixture
 def authorized_user_context(monkeypatch):
     """User with both can_manage_licenses and can_access_cart permissions."""
@@ -475,3 +493,34 @@ def test_subscriptions_unknown_category_redirects_to_all(categorised_subscriptio
 
     assert response.status_code == 303
     assert response.headers["location"] == "/subscriptions"
+
+
+def _end_date_cell(html: str) -> str:
+    marker = 'data-column="end_date"'
+    start = html.index(marker)
+    return html[start : html.index("</td>", start)]
+
+
+def test_subscriptions_page_shows_end_date_set_on_recurring_item(
+    authorized_user_context, recurring_items
+):
+    recurring_items.append(
+        {"company_id": 10, "product_code": "SKU-A", "active": 1, "end_date": date(2027, 3, 31)}
+    )
+    from app.repositories import subscriptions as subscriptions_repo
+
+    original = subscriptions_repo.list_subscriptions
+
+    async def with_sku(**kwargs):
+        rows = await original(**kwargs)
+        return [{**row, "product_sku": "sku-a ", "auto_renew": True} for row in rows]
+
+    subscriptions_repo.list_subscriptions = with_sku
+    try:
+        with TestClient(app) as client:
+            response = client.get("/subscriptions")
+    finally:
+        subscriptions_repo.list_subscriptions = original
+
+    assert response.status_code == 200
+    assert "2027-03-31" in _end_date_cell(response.text)

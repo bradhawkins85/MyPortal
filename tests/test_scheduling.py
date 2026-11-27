@@ -247,7 +247,8 @@ async def test_conflicts_only_for_scheduled(monkeypatch):
                                         "starts_at": datetime(2026, 12, 1), "ends_at": datetime(2026, 12, 1, 1)},
                                        exclude_id=7)
     assert found and overlapping.await_args.args[3] == 7
-    assert "Book anyway" in scheduling.conflict_message(found, BRISBANE.zone)
+    message = scheduling.conflict_message(found, BRISBANE.zone)
+    assert "Book anyway" not in message and "Choose another time" in message
 
 
 def test_appointment_events_are_automation_triggers():
@@ -329,7 +330,7 @@ async def test_repository_queries_bind_every_value(monkeypatch):
 # Booking kinds and booking from the ticket page
 # --------------------------------------------------------------------------- #
 
-KINDS_MIGRATION = Path("migrations/584_booking_kinds.sql")
+KINDS_MIGRATION = Path("migrations/585_booking_kinds.sql")
 
 
 def _kind_rows():

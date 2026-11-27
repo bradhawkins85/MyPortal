@@ -57,6 +57,7 @@ NVD_MAX_INCREMENTAL = timedelta(days=110)  # NVD allows at most 120 days per las
 SYNC_INTERVAL = timedelta(hours=24)
 RUN_TIME_LIMIT = timedelta(minutes=45)
 STALE_RUN = timedelta(hours=2)
+FAILURE_RETRY = timedelta(hours=1)
 HTTP_TIMEOUT = 60.0
 DISTRO_SOURCES = ("dpkg", "rpm", "pacman")
 MATCH_TYPES = {"exact": "Is exactly", "starts_with": "Starts with", "contains": "Contains"}
@@ -514,8 +515,8 @@ async def sync(*, now: datetime | None = None, force: bool = False,
             try:
                 result["kev"] = await refresh_kev(client)
                 await repo.update_state(kev_synced_at=started)
-            except (httpx.HTTPError, ValueError) as exc:
-                result["errors"].append(f"CISA KEV: {exc}")
+            except Exception as exc:  # noqa: BLE001 - one source failing must not stop the run
+                result["errors"].append(f"CISA KEV: {exc}"[:500])
         mappings = await all_mappings()
         _software, products = await installed_products(mappings)
         known = await repo.list_products()
@@ -534,13 +535,14 @@ async def sync(*, now: datetime | None = None, force: bool = False,
                 await repo.save_product(vendor, product, synced_at=started, error=None)
                 result["products"] += 1
                 result["cves"] += len(cves)
-            except (httpx.HTTPError, ValueError) as exc:
+            except Exception as exc:  # noqa: BLE001 - one product failing must not stop the run
                 message = f"{vendor}:{product}: {exc}"[:500]
                 result["errors"].append(message)
                 await repo.save_product(vendor, product, synced_at=None, error=message)
             await sleep(nvd_delay())
     result["findings"] = await match_findings(_utcnow())
-    await repo.update_state(nvd_synced_at=started, last_error="; ".join(result["errors"])[:1000] or None)
+    await repo.update_state(nvd_synced_at=started, failed_at=None,
+                            last_error="; ".join(result["errors"])[:1000] or None)
     logger.info("Vulnerability sync finished: {}", result)
     return result
 
@@ -553,7 +555,7 @@ async def _run_in_background(force: bool) -> None:
         await sync(force=force)
     except Exception as exc:  # noqa: BLE001 - recorded for the settings page
         logger.warning("Vulnerability sync failed: {}", exc)
-        await repo.update_state(last_error=f"Sync failed: {exc}"[:1000])
+        await repo.update_state(failed_at=_utcnow(), last_error=f"Sync failed: {exc}"[:1000])
     finally:
         await repo.update_state(running_since=None)
 
@@ -566,6 +568,11 @@ async def tick(now: datetime | None = None) -> bool:
     requested = state.get("requested_at") is not None
     last = _as_naive(state.get("nvd_synced_at"))
     if not requested and last is not None and now - last < SYNC_INTERVAL:
+        return False
+    # A failed run never records nvd_synced_at, so wait before retrying it
+    # rather than starting it again every minute.
+    failed = _as_naive(state.get("failed_at"))
+    if not requested and failed is not None and now - failed < FAILURE_RETRY:
         return False
     if not await repo.claim_run(now, now - STALE_RUN):
         return False

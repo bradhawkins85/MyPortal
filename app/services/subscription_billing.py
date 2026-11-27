@@ -106,3 +106,68 @@ async def deactivate_subscription_recurring_item(
     if not updated:
         raise RuntimeError("Failed to deactivate subscription recurring invoice item")
     return updated
+
+
+def _normalise_code(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def display_end_date(
+    subscription: Mapping[str, Any],
+    *,
+    recurring_item: Mapping[str, Any] | None = None,
+    pending_decrease: int = 0,
+) -> Any:
+    """Return the end date to show for a subscription, or ``None`` when it renews.
+
+    Shop subscriptions renew until the customer decreases them to zero, so the
+    term end date is only a known end date when a decrease to zero is pending
+    or the subscription will not renew. An end date an admin set on the linked
+    recurring invoice item always shows. Subscriptions not ordered through the
+    shop keep their recorded end date.
+    """
+    if not subscription.get("product_id"):
+        return subscription.get("end_date")
+    if recurring_item and recurring_item.get("end_date"):
+        return recurring_item["end_date"]
+    quantity = int(subscription.get("quantity") or 0)
+    if quantity > 0 and pending_decrease >= quantity:
+        return subscription.get("end_date")
+    status = str(subscription.get("status") or "").strip().lower()
+    if not subscription.get("auto_renew", True) or status in {"canceled", "expired"}:
+        return subscription.get("end_date")
+    return None
+
+
+async def resolve_display_end_dates(
+    subscriptions: list[Mapping[str, Any]],
+    pending_changes_by_subscription: Mapping[str, list[Mapping[str, Any]]] | None = None,
+) -> dict[str, Any]:
+    """Map each subscription ID to the end date its table row should show."""
+    company_ids = [
+        int(sub["customer_id"])
+        for sub in subscriptions
+        if sub.get("product_id") and sub.get("customer_id") is not None
+    ]
+    items: dict[tuple[int, str], Mapping[str, Any]] = {}
+    for item in await recurring_items_repo.list_items_for_company_ids(company_ids):
+        key = (int(item["company_id"]), _normalise_code(item.get("product_code")))
+        items.setdefault(key, item)
+    pending_changes_by_subscription = pending_changes_by_subscription or {}
+    result: dict[str, Any] = {}
+    for sub in subscriptions:
+        recurring_item = None
+        sku = _normalise_code(sub.get("product_sku"))
+        if sub.get("product_id") and sub.get("customer_id") is not None and sku:
+            recurring_item = items.get(
+                (int(sub["customer_id"]), sku)
+            )
+        pending_decrease = sum(
+            int(change.get("quantity_change") or 0)
+            for change in pending_changes_by_subscription.get(sub["id"], [])
+            if change.get("change_type") == "decrease"
+        )
+        result[sub["id"]] = display_end_date(
+            sub, recurring_item=recurring_item, pending_decrease=pending_decrease
+        )
+    return result

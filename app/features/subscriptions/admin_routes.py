@@ -25,9 +25,11 @@ from app.api.routes.subscriptions import (
 from app.core.logging import log_error
 from app.repositories import companies as companies_repo
 from app.repositories import subscription_categories as categories_repo
+from app.repositories import subscription_change_requests as change_requests_repo
 from app.repositories import shop as shop_repo
 from app.repositories import subscriptions as subscriptions_repo
 from app.security.csrf import parse_csrf_form
+from app.services import subscription_billing
 from app.services.voice_monitor_billing import (
     contract_display,
     is_voice_monitor_subscription,
@@ -227,7 +229,18 @@ async def admin_subscriptions_page(
         )
 
         categories = await categories_repo.list_categories()
+        pending_changes = (
+            await change_requests_repo.list_pending_changes_for_subscriptions(
+                [sub["id"] for sub in subs]
+            )
+            if subs
+            else {}
+        )
+        display_end_dates = await subscription_billing.resolve_display_end_dates(
+            subs, pending_changes
+        )
         for sub in subs:
+            sub["display_end_date"] = display_end_dates.get(sub["id"])
             if is_voice_monitor_subscription(sub):
                 sub["voice_monitor_contract"] = contract_display(sub)
         status_counts: Counter[str | None] = Counter(sub.get("status") for sub in subs)

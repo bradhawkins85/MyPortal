@@ -8,10 +8,12 @@ remote sessions, phone calls, meetings or any other booking kind you add.
 The board shows one row per technician across the working day (07:00–19:00 by default) for the
 chosen date, with today's time marked. Each appointment is a block coloured by kind; overlapping
 bookings stack so both stay visible, and a red outline means it couldn't be written to the
-technician's calendar. Each row shows how much of the day is booked.
+technician's calendar. Each row shows how much of the day is booked. When calendar sync is on,
+time the technician's own Outlook calendar shows as busy is shaded **Unavailable** (see below).
 
 - Click an appointment to change it, mark it as done or cancel it.
 - Click an empty spot on a technician's row to book them at that time (to the nearest 15 minutes).
+  Unavailable time can't be clicked.
 - **Waiting to be scheduled** lists open tickets with no upcoming appointment; **Book** opens the
   editor for that ticket and its assigned technician.
 - **My schedule** (`/admin/schedule/me`) lists a technician's week, day by day.
@@ -37,8 +39,12 @@ can't be removed; make another kind the default first.
 ## Booking
 
 Choose the ticket, technician, kind, date, start time and length, and optionally where and notes
-for the technician. Times are in the scheduling time zone. If the technician is already booked
-then, MyPortal says with what and asks you to tick **Book anyway** to double-book.
+for the technician. Times are in the scheduling time zone. Once you choose the technician and date,
+the editor lists the time they're already taken that day (other appointments, and time their
+calendar shows as busy) and **Book** stays disabled while the chosen time overlaps it. MyPortal
+also refuses such a booking when it's saved, so a technician can't be double-booked or booked over
+their own calendar. Saving an appointment without moving it (changing its notes, say) isn't
+re-checked.
 
 Booking, changing, completing or cancelling an appointment:
 
@@ -61,6 +67,16 @@ cancelled. Writes happen in the background; the appointment shows *In calendar* 
 failed* with the reason and a **Retry calendar** button, and failed writes are retried every ten
 minutes, up to five times.
 
+### Busy time from technicians' calendars
+
+With calendar sync on, MyPortal also reads each technician's calendar every ten minutes for the
+next 60 days and stores only **when** they're busy: the start and end of events shown as *Busy*,
+*Tentative* or *Away* (events shown as *Free* or *Working elsewhere*, cancelled events and
+MyPortal's own appointments are ignored). It never reads or stores an event's subject, body,
+location or attendees, and overlapping events are merged into one window, so the board and editor
+show only "Unavailable". The settings card shows when busy time was last read and any problem
+reading a mailbox. Turning calendar sync off removes the stored busy time.
+
 Settings also set the board's hours, the time zone and the default appointment length.
 
 ## API
@@ -70,9 +86,10 @@ Settings also set the board's hours, the time zone and the default appointment l
 | `GET` | `/api/appointments?start=&end=&technician_id=` (UTC, up to 93 days) |
 | `GET` | `/api/appointments/{id}` |
 | `GET` | `/api/tickets/{ticket_id}/appointments` |
-| `POST` | `/api/appointments` (409 when the technician is already booked, unless `book_anyway`) |
+| `POST` | `/api/appointments` (409 when the technician is already booked or unavailable then) |
 | `PUT` | `/api/appointments/{id}` |
 | `POST` | `/api/appointments/{id}/cancel` |
+| `GET` | `/api/scheduling/availability?technician_id=&date=&exclude=` (a technician's taken time that day, local `HH:MM`; no event details) |
 | `GET` | `/api/scheduling/settings` (super admins) |
 | `GET` | `/api/scheduling/kinds` |
 | `POST` | `/api/scheduling/kinds` (super admins) |
