@@ -14,6 +14,13 @@ from app.services import subscription_pricing
 from app.services import subscription_billing
 
 
+def _is_active(item: dict[str, Any]) -> bool:
+    value = item.get("active")
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes"}
+    return bool(value)
+
+
 async def create_subscriptions_from_order(
     *,
     order_number: str,
@@ -95,7 +102,12 @@ async def create_subscriptions_from_order(
         # Adopt manually maintained recurring items by SKU. Their already billed
         # quantity and schedule are retained; only the newly ordered quantity is
         # added, so existing licences are never invoiced again.
+        # An inactive item belongs to a deleted or cancelled subscription: it is
+        # reused as the billing row but its old quantity and schedule are not.
         existing_recurring = await subscription_billing.find_existing_item(company_id, product)
+        reused_recurring = existing_recurring
+        if existing_recurring and not _is_active(existing_recurring):
+            existing_recurring = None
         adopted_quantity = 0
         if existing_recurring:
             adopted_quantity = subscription_billing.recurring_quantity(existing_recurring)
@@ -139,7 +151,7 @@ async def create_subscriptions_from_order(
             )
             recurring_item = await subscription_billing.sync_subscription_recurring_item(
                 subscription,
-                existing=existing_recurring,
+                existing=existing_recurring or reused_recurring,
                 preserve_existing_schedule=existing_recurring is not None,
             )
 
