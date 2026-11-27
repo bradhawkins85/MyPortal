@@ -15,6 +15,7 @@
   "program": ("Check whether a program is installed, with an optional version requirement.", "M3 4h18v16H3zM3 8h18M7 12h10M7 16h6"),
   "process": ("A program is not running, or is running when it should not be.", "M3 5h18v14H3zM3 9h18M7 13l2 2-2 2M12 17h4"),
   "proxmox": ("On a Proxmox VE host: a guest stops, storage fills, a ZFS pool degrades, a backup fails or the cluster loses quorum.", "M3 4h18v6H3zM3 14h18v6H3zM7 7h.01M7 17h.01M11 7h6M11 17h6"),
+  "snmp": ("A switch, firewall, UPS or printer stops answering SNMP or reports a bad value. Polled by a device on the same network.", "M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01M12 10v4M16 7h2M16 17h2"),
   "script": ("Run a script on a schedule and test its exit code or output.", "M4 17l6-6-6-6M12 19h8"),
   "offline": ("The device's agent stops checking in.", "M2 2l20 20M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 5.2-2.8M19 13a10 10 0 0 0-2.4-1.6M2 9.5a15 15 0 0 1 4.3-2.7M12 20h.01"),
 } %}
@@ -42,6 +43,12 @@
   "process_name": "rmm-check-process-name", "process_expected": "rmm-check-process-expected",
   "program_name": "rmm-check-program-name", "program_expected": "rmm-check-program-expected",
   "program_version_operator": "rmm-check-program-version-operator", "program_version": "rmm-check-program-version",
+  "snmp_host": "rmm-check-snmp-host", "snmp_port": "rmm-check-snmp-port", "snmp_version": "rmm-check-snmp-version",
+  "snmp_oid": "rmm-check-snmp-oid", "snmp_condition": "rmm-check-snmp-condition", "snmp_value": "rmm-check-snmp-value",
+  "snmp_community": "rmm-check-snmp-community", "snmp_username": "rmm-check-snmp-username",
+  "snmp_security_level": "rmm-check-snmp-security-level", "snmp_auth_protocol": "rmm-check-snmp-auth-protocol",
+  "snmp_auth_password": "rmm-check-snmp-auth-password", "snmp_priv_protocol": "rmm-check-snmp-priv-protocol",
+  "snmp_priv_password": "rmm-check-snmp-priv-password",
   "proxmox_condition": "rmm-check-proxmox-condition", "proxmox_target": "rmm-check-proxmox-target", "proxmox_threshold": "rmm-check-proxmox-threshold",
   "package_id": "rmm-check-package-id",
   "check_script_id": "rmm-check-script", "script_expect": "rmm-check-script-expect", "script_value": "rmm-check-script-value",
@@ -320,6 +327,110 @@
             <input class="form-input" id="rmm-check-program-version" name="program_version" maxlength="255" value="{{ e.program_version }}" placeholder="1.2.3"{{ invalid("program_version", "rmm-check-program-version-help") }}>
             <p class="form-help" id="rmm-check-program-version-help">Numeric versions such as 1.2.3. Every installed version must match. Unreadable versions report Unknown.</p>
             {{ field_error("program_version") }}
+          </div>
+        </div>
+      </fieldset>
+
+      {% set snmp_saved = e.snmp_saved if e.snmp_saved is defined and e.snmp_saved else {} %}
+      <fieldset class="rmm-check__settings" data-rmm-check-fields="snmp">
+        <legend class="visually-hidden">SNMP settings</legend>
+        <p class="form-help">The device this check is added to (or the devices your advanced rules choose) asks the network device for the value every minute, so pick one on the same network.</p>
+        <div class="rmm-field-row">
+          <div class="form-field rmm-field--grow">
+            <label class="form-label" for="rmm-check-snmp-host">Network device</label>
+            <input class="form-input" id="rmm-check-snmp-host" name="snmp_host" maxlength="253" value="{{ e.snmp_host }}" placeholder="192.168.1.2 or switch01.example.local" autocomplete="off" spellcheck="false"{{ invalid("snmp_host") }}>
+            {{ field_error("snmp_host") }}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-snmp-version">Version</label>
+            <select class="form-input" id="rmm-check-snmp-version" name="snmp_version" data-rmm-snmp-version{{ invalid("snmp_version") }}>
+              {% for key, label in (snmp_versions | default({})).items() %}<option value="{{ key }}" {% if e.snmp_version == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+            {{ field_error("snmp_version") }}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-snmp-port">Port</label>
+            <input class="form-input rmm-input--short" id="rmm-check-snmp-port" name="snmp_port" type="number" inputmode="numeric" min="1" max="65535" value="{{ e.snmp_port }}"{{ invalid("snmp_port") }}>
+            {{ field_error("snmp_port") }}
+          </div>
+        </div>
+        <div class="rmm-field-row" data-rmm-snmp-show="v1,v2c">
+          <div class="form-field rmm-field--grow">
+            <label class="form-label" for="rmm-check-snmp-community">Community string</label>
+            <input class="form-input" id="rmm-check-snmp-community" name="snmp_community" type="password" maxlength="255" value="" autocomplete="new-password" placeholder="{{ 'Saved: leave blank to keep it' if snmp_saved.get('snmp_community') else 'e.g. public' }}"{{ invalid("snmp_community", "rmm-check-snmp-community-help") }}>
+            <p class="form-help" id="rmm-check-snmp-community-help">Stored encrypted and only sent to the polling device. Use a read-only community.</p>
+            {{ field_error("snmp_community") }}
+          </div>
+        </div>
+        <div data-rmm-snmp-show="v3">
+          <div class="rmm-field-row">
+            <div class="form-field rmm-field--grow">
+              <label class="form-label" for="rmm-check-snmp-username">User name</label>
+              <input class="form-input" id="rmm-check-snmp-username" name="snmp_username" maxlength="64" value="{{ e.snmp_username }}" autocomplete="off" spellcheck="false"{{ invalid("snmp_username") }}>
+              {{ field_error("snmp_username") }}
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="rmm-check-snmp-security-level">Security</label>
+              <select class="form-input" id="rmm-check-snmp-security-level" name="snmp_security_level" data-rmm-snmp-level{{ invalid("snmp_security_level") }}>
+                {% for key, label in (snmp_security_levels | default({})).items() %}<option value="{{ key }}" {% if e.snmp_security_level == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+              </select>
+              {{ field_error("snmp_security_level") }}
+            </div>
+          </div>
+          <div class="rmm-field-row" data-rmm-snmp-level-show="authNoPriv,authPriv">
+            <div class="form-field">
+              <label class="form-label" for="rmm-check-snmp-auth-protocol">Authentication</label>
+              <select class="form-input" id="rmm-check-snmp-auth-protocol" name="snmp_auth_protocol"{{ invalid("snmp_auth_protocol") }}>
+                {% for key, label in (snmp_auth_protocols | default({})).items() %}<option value="{{ key }}" {% if e.snmp_auth_protocol == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="form-field rmm-field--grow">
+              <label class="form-label" for="rmm-check-snmp-auth-password">Authentication password</label>
+              <input class="form-input" id="rmm-check-snmp-auth-password" name="snmp_auth_password" type="password" maxlength="255" value="" autocomplete="new-password" placeholder="{{ 'Saved: leave blank to keep it' if snmp_saved.get('snmp_auth_password') else 'At least 8 characters' }}"{{ invalid("snmp_auth_password") }}>
+              {{ field_error("snmp_auth_password") }}
+            </div>
+          </div>
+          <div class="rmm-field-row" data-rmm-snmp-level-show="authPriv">
+            <div class="form-field">
+              <label class="form-label" for="rmm-check-snmp-priv-protocol">Encryption</label>
+              <select class="form-input" id="rmm-check-snmp-priv-protocol" name="snmp_priv_protocol"{{ invalid("snmp_priv_protocol") }}>
+                {% for key, label in (snmp_priv_protocols | default({})).items() %}<option value="{{ key }}" {% if e.snmp_priv_protocol == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="form-field rmm-field--grow">
+              <label class="form-label" for="rmm-check-snmp-priv-password">Encryption password</label>
+              <input class="form-input" id="rmm-check-snmp-priv-password" name="snmp_priv_password" type="password" maxlength="255" value="" autocomplete="new-password" placeholder="{{ 'Saved: leave blank to keep it' if snmp_saved.get('snmp_priv_password') else 'At least 8 characters' }}"{{ invalid("snmp_priv_password") }}>
+              {{ field_error("snmp_priv_password") }}
+            </div>
+          </div>
+        </div>
+        <div class="rmm-field-row">
+          <div class="form-field rmm-field--grow">
+            <label class="form-label" for="rmm-check-snmp-preset">Watch</label>
+            <select class="form-input" id="rmm-check-snmp-preset" name="snmp_preset" data-rmm-snmp-preset>
+              {% for key, preset in (snmp_presets | default({})).items() %}<option value="{{ key }}" data-oid="{{ preset.oid }}" data-condition="{{ preset.condition }}" data-value="{{ preset.value }}" {% if e.snmp_preset == key %}selected{% endif %}>{{ preset.label }}</option>{% endfor %}
+            </select>
+            <p class="form-help">Fills in a common OID. You can change it below.</p>
+          </div>
+          <div class="form-field rmm-field--grow">
+            <label class="form-label" for="rmm-check-snmp-oid">OID</label>
+            <input class="form-input" id="rmm-check-snmp-oid" name="snmp_oid" maxlength="1400" value="{{ e.snmp_oid }}" placeholder="1.3.6.1.2.1.1.3.0" autocomplete="off" spellcheck="false"{{ invalid("snmp_oid") }}>
+            {{ field_error("snmp_oid") }}
+          </div>
+        </div>
+        <div class="rmm-field-row">
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-snmp-condition">Fails when</label>
+            <select class="form-input" id="rmm-check-snmp-condition" name="snmp_condition" data-rmm-snmp-condition{{ invalid("snmp_condition") }}>
+              {% for key, label in (snmp_conditions | default({})).items() %}<option value="{{ key }}" {% if e.snmp_condition == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+            <p class="form-help">Every SNMP check also fails when the device does not answer.</p>
+            {{ field_error("snmp_condition") }}
+          </div>
+          <div class="form-field rmm-field--grow" data-rmm-snmp-value-field>
+            <label class="form-label" for="rmm-check-snmp-value">Value</label>
+            <input class="form-input" id="rmm-check-snmp-value" name="snmp_value" maxlength="255" value="{{ e.snmp_value }}" autocomplete="off"{{ invalid("snmp_value") }}>
+            {{ field_error("snmp_value") }}
           </div>
         </div>
       </fieldset>

@@ -1,0 +1,7 @@
+{
+  "guid": "a149e62d-39e6-4dc1-8cbd-115512881742",
+  "occurred_at": "2026-11-26T23:52Z",
+  "change_type": "Fix",
+  "summary": "Low satisfaction ratings, critical and high vulnerabilities and actively exploited CVEs now show as red status pills instead of plain text.",
+  "content_hash": "360df6460f1695224e661293a4362ee0ac8c16c1d8d84402123eecf9fcaf882a"
+}

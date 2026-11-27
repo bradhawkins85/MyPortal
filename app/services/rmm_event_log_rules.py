@@ -379,6 +379,17 @@ async def _ticket_step(rule: Mapping[str, Any], agent: Mapping[str, Any], matche
         listed += f"<p>…and {count - TICKET_EVENTS_LISTED} more.</p>"
     reference = f"rmm-event-log-rule:{rule_id}:{agent_id}"
 
+    from app.services import rmm_maintenance
+
+    try:
+        held = await rmm_maintenance.agent_coverage(agent)
+    except Exception as exc:  # noqa: BLE001 - never lose a ticket because the lookup failed
+        log_error("RMM maintenance window lookup failed", rule_id=rule_id, agent_id=agent_id, error=str(exc))
+        held = None
+    if held:
+        log_info("RMM event log rule ticket held for maintenance", rule_id=rule_id, agent_id=agent_id)
+        return f"No ticket for {device}: it is in maintenance ({held.names}).", False
+
     ticket = await rmm_actions.open_ticket(await rules_repo.get_rule_ticket(rule_id, agent_id))
     if ticket:
         await rmm_actions.add_ticket_update(

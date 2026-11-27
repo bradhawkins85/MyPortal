@@ -152,3 +152,51 @@ def test_create_subscriptions_from_order_applies_coterm_metadata(monkeypatch):
     assert created_payload["unit_price"] == Decimal("120.00")
     assert created_payload["prorated_price"] == Decimal("64.11")
     assert created_payload["end_date"] == date(2026, 3, 31)
+
+
+def test_create_subscriptions_uses_monthly_price_option_for_term(monkeypatch):
+    """A product offering only the monthly-commitment price gets a monthly term."""
+    created_payload: dict = {}
+
+    async def order_items(*_args):
+        return [{"product_id": 1, "quantity": 1, "is_vip": 0}]
+
+    async def products(*_args, **_kwargs):
+        return [{
+            "id": 1,
+            "sku": "AI-RECEPTIONIST-200",
+            "name": "AI Receptionist",
+            "subscription_category_id": 10,
+            "commitment_type": None,
+            "payment_frequency": None,
+            "price_monthly_commitment": "125.00",
+            "price_annual_monthly_payment": None,
+            "price_annual_annual_payment": None,
+            "price": "0.00",
+            "vip_price": None,
+        }]
+
+    async def find(*_args):
+        return None
+
+    async def create(**values):
+        created_payload.update(values)
+        return {"id": "sub-1", **values}
+
+    async def sync(subscription, **_values):
+        return {"id": 1}
+
+    monkeypatch.setattr(integration.shop_repo, "list_order_items", order_items)
+    monkeypatch.setattr(integration.shop_repo, "list_products_by_ids", products)
+    monkeypatch.setattr(integration.subscription_billing, "find_existing_item", find)
+    monkeypatch.setattr(integration.subscription_billing, "sync_subscription_recurring_item", sync)
+    monkeypatch.setattr(integration.subscriptions_repo, "create_subscription", create)
+
+    created = asyncio.run(integration.create_subscriptions_from_order(
+        order_number="ORD-4", company_id=99, user_id=42
+    ))
+
+    assert len(created) == 1
+    assert created_payload["unit_price"] == Decimal("125.00")
+    term = created_payload["end_date"] - created_payload["start_date"]
+    assert term.days == 30

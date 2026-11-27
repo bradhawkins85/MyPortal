@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/scheduling.css') }}">{% endblock %}
+
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Schedule</span>
+    <nav class="page-header-toolbar sch-daynav" aria-label="Choose a day">
+      <a class="button button--ghost button--small" href="/admin/schedule?date={{ previous_day }}" aria-label="Previous day">‹</a>
+      <a class="button button--ghost button--small" href="/admin/schedule?date={{ today }}" {% if day.isoformat() == today %}aria-current="date"{% endif %}>Today</a>
+      <a class="button button--ghost button--small" href="/admin/schedule?date={{ next_day }}" aria-label="Next day">›</a>
+      <form method="get" action="/admin/schedule" class="sch-daynav__form">
+        <label class="visually-hidden" for="sch-date">Date</label>
+        <input id="sch-date" type="date" name="date" value="{{ day.isoformat() }}" class="form-input" data-submit-on-change>
+        <noscript><button type="submit" class="button button--ghost button--small">Go</button></noscript>
+      </form>
+      <strong class="sch-daynav__label">{{ day.strftime("%A %d %B %Y") }}</strong>
+    </nav>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "+ Book appointment", "type": "link", "variant": "primary", "href": "/admin/schedule?new=1&date=" ~ day.isoformat(), "attrs": {"data-sch-open": "", "aria-haspopup": "dialog", "aria-controls": "sch-modal"}},
+    {"label": "My schedule", "type": "link", "href": "/admin/schedule/me"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+{% set booked = namespace(count=0, failed=0) %}
+{% for row in board.rows %}{% for item in row["items"] %}{% if item.status == "scheduled" %}{% set booked.count = booked.count + 1 %}{% endif %}{% if item.sync_status == "failed" %}{% set booked.failed = booked.failed + 1 %}{% endif %}{% endfor %}{% endfor %}
+<div class="admin-grid sch-page">
+  {{ counter_strip([
+    {"label": "Booked today", "value": booked.count, "variant": "info"},
+    {"label": "Waiting to be scheduled", "value": unscheduled | length, "variant": ("warning" if unscheduled else "neutral"), "href": "#sch-waiting"},
+    {"label": "Calendar sync problems", "value": booked.failed, "variant": ("danger" if booked.failed else "neutral")},
+  ], total=board.rows | length, total_label="Technicians") }}
+
+  <section class="card card--panel admin-grid__full" aria-labelledby="sch-board-heading">
+    <div class="card__header"><div>
+      <h2 class="card__title" id="sch-board-heading">Dispatch board</h2>
+      <p class="card__subtitle">Each technician's day from {{ "%02d:00" | format(settings.day_start_hour) }} to {{ "%02d:00" | format(settings.day_end_hour) }} ({{ settings.timezone }}). Click an appointment to change it, or an empty spot on a technician's row to book them then.{% if settings.calendar_sync %} Appointments are also written to technicians' Microsoft 365 calendars.{% endif %}</p>
+    </div></div>
+    {% if board.rows %}
+    <div class="sch-board" data-sch-board data-start-hour="{{ settings.day_start_hour }}" data-end-hour="{{ settings.day_end_hour }}" data-date="{{ day.isoformat() }}">
+      <div class="sch-board__head" aria-hidden="true">
+        <span class="sch-board__name"></span>
+        <span class="sch-board__track">{% for hour in board.hours %}<span class="sch-board__hour" style="left: {{ hour.left }}%">{{ hour.label }}</span>{% endfor %}</span>
+      </div>
+      {% for row in board.rows %}
+      <div class="sch-row" data-sch-row data-technician="{{ row.technician.id }}">
+        <span class="sch-board__name">
+          <a href="/admin/schedule/me?technician_id={{ row.technician.id }}&amp;week={{ day.isoformat() }}">{{ row.name }}</a>
+          <span class="text-muted sch-row__load">{{ row.booked_percent }}% booked</span>
+        </span>
+        <span class="sch-board__track sch-row__track" style="--sch-lanes: {{ row.lanes }}" data-sch-track>
+          {% for hour in board.hours %}<span class="sch-row__gridline" style="left: {{ hour.left }}%" aria-hidden="true"></span>{% endfor %}
+          {% if board.now_left is not none %}<span class="sch-row__now" style="left: {{ board.now_left }}%" aria-hidden="true"></span>{% endif %}
+          {% for item in row["items"] %}
+          <a class="sch-block sch-block--{{ item.kind }} sch-block--{{ item.status }}{% if item.sync_status == 'failed' %} sch-block--sync-failed{% endif %}" style="left: {{ item.left }}%; width: {{ item.width }}%; --sch-lane: {{ item.lane }}" href="/admin/schedule?date={{ day.isoformat() }}&amp;appointment={{ item.id }}" title="{{ item.kind_label }} · {{ item.when }} · {{ item.company_name or '' }} · #{{ item.ticket_number or item.ticket_id }} {{ item.ticket_subject or '' }}">
+            <span class="sch-block__time">{{ item.start_label }}–{{ item.end_label }}</span>
+            <span class="sch-block__title">#{{ item.ticket_number or item.ticket_id }} {{ item.company_name or item.ticket_subject or '' }}</span>
+          </a>
+          {% endfor %}
+        </span>
+        <a class="visually-hidden sch-row__book" href="/admin/schedule?new=1&amp;date={{ day.isoformat() }}&amp;technician_id={{ row.technician.id }}">Book {{ row.name }} on {{ day.isoformat() }}</a>
+      </div>
+      {% endfor %}
+      <ul class="sch-legend" aria-label="Key">
+        {% for key, label in kinds.items() %}<li><span class="sch-legend__swatch sch-block--{{ key }}" aria-hidden="true"></span>{{ label }}</li>{% endfor %}
+        <li><span class="sch-legend__swatch sch-block--completed" aria-hidden="true"></span>Done</li>
+      </ul>
+    </div>
+    {% else %}
+    <p class="empty-state">No technicians yet. Give users the helpdesk technician permission to see them here.</p>
+    {% endif %}
+  </section>
+
+  <section class="card card--panel admin-grid__full" id="sch-waiting" aria-labelledby="sch-waiting-heading">
+    <div class="card__header"><div>
+      <h2 class="card__title" id="sch-waiting-heading">Waiting to be scheduled</h2>
+      <p class="card__subtitle">Open tickets with no upcoming appointment, most recently updated first.</p>
+    </div></div>
+    {% if unscheduled %}
+    <ul class="sch-waiting">
+      {% for ticket in unscheduled[:30] %}
+      <li>
+        <span><a href="/admin/tickets/{{ ticket.id }}">#{{ ticket.ticket_number or ticket.id }}</a> {{ ticket.subject }} <span class="text-muted">· {{ ticket.company_name or "No company" }}{% if ticket.priority %} · {{ ticket.priority | title }}{% endif %}</span></span>
+        <a class="button button--ghost button--small" href="/admin/schedule?new=1&amp;date={{ day.isoformat() }}&amp;ticket_id={{ ticket.id }}{% if ticket.assigned_user_id %}&amp;technician_id={{ ticket.assigned_user_id }}{% endif %}" data-sch-open-link>Book</a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-state">Every open ticket has an appointment coming up, or there are no open tickets.</p>
+    {% endif %}
+  </section>
+
+  {% if can_manage %}
+  <section class="card card--panel admin-grid__full" id="schedule-settings" aria-labelledby="sch-settings-heading">
+    <div class="card__header"><div>
+      <h2 class="card__title" id="sch-settings-heading">Scheduling settings</h2>
+      <p class="card__subtitle">To write appointments to technicians' Outlook calendars, choose the company whose Microsoft 365 connection holds your technicians' mailboxes (usually your own business). Its app needs the <strong>Calendars.ReadWrite</strong> application permission.</p>
+    </div></div>
+    <form method="post" action="/admin/schedule/settings" class="sch-settings">
+      {% include "partials/csrf.html" %}
+      <div class="form-field">
+        <label class="form-label" for="sch-m365">Microsoft 365 calendar sync</label>
+        <select class="form-input" id="sch-m365" name="m365_company_id">
+          <option value="">Off: keep appointments in MyPortal only</option>
+          {% for company in companies %}<option value="{{ company.id }}" {% if settings.m365_company_id == company.id %}selected{% endif %}>{{ company.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="sch-tz">Time zone</label>
+        <select class="form-input" id="sch-tz" name="timezone">{% for zone in timezones %}<option value="{{ zone }}" {% if zone == settings.timezone %}selected{% endif %}>{{ zone }}</option>{% endfor %}</select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="sch-start">Board starts at</label>
+        <select class="form-input" id="sch-start" name="day_start_hour">{% for hour in range(0, 24) %}<option value="{{ hour }}" {% if hour == settings.day_start_hour %}selected{% endif %}>{{ "%02d:00" | format(hour) }}</option>{% endfor %}</select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="sch-end">and ends at</label>
+        <select class="form-input" id="sch-end" name="day_end_hour">{% for hour in range(1, 25) %}<option value="{{ hour }}" {% if hour == settings.day_end_hour %}selected{% endif %}>{{ "%02d:00" | format(hour % 24) }}{{ " (midnight)" if hour == 24 }}</option>{% endfor %}</select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="sch-default">Default length</label>
+        <select class="form-input" id="sch-default" name="default_duration_minutes">{% for minutes in durations %}<option value="{{ minutes }}" {% if minutes == settings.default_duration_minutes %}selected{% endif %}>{{ (minutes // 60 ~ " h " if minutes >= 60 else "") ~ (minutes % 60 ~ " min" if minutes % 60 else "") }}</option>{% endfor %}</select>
+      </div>
+      <div class="form-actions"><button type="submit" class="button button--primary">Save settings</button></div>
+    </form>
+  </section>
+  {% endif %}
+</div>
+{% include "scheduling/_appointment_editor.html" %}
+{% endblock %}
+
+{% block scripts %}<script src="{{ static_url('/static/js/scheduling.js') }}" defer></script>{% endblock %}

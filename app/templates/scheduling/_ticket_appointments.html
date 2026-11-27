@@ -1,0 +1,28 @@
+{#- The ticket page's Appointments card (ticket_appointments from app.features.scheduling.routes). -#}
+{% set ta = ticket_appointments %}
+<details class="card card--panel card-collapsible" data-ticket-appointments-card {% if ta.upcoming %}open{% endif %}>
+  <summary class="card__header card__header--collapsible">
+    <h2 class="card__title">Appointments{% if ta.upcoming %} <span class="badge">{{ ta.upcoming }} upcoming</span>{% endif %}</h2>
+    <div class="card__collapsible-meta">
+      <a class="button button--ghost button--small" href="/admin/schedule?new=1&amp;ticket_id={{ ticket.id }}{% if ticket.assigned_user_id %}&amp;technician_id={{ ticket.assigned_user_id }}{% endif %}">Book appointment</a>
+      <span class="card__toggle-icon" aria-hidden="true"></span>
+    </div>
+  </summary>
+  <div class="card-collapsible__content"><div class="card__body">
+    {% if ta["items"] %}
+    <ul class="ticket-appointments">
+      {% for item in ta["items"] %}
+      <li>
+        <a href="/admin/schedule?date={{ item.day }}&amp;appointment={{ item.id }}"><strong>{{ item.kind_label }}</strong> · {{ item.when }}</a>
+        <span class="text-muted">with {{ item.technician }}{% if item.location %} · {{ item.location }}{% endif %}</span>
+        {% if item.status != "scheduled" %}<span class="status status--neutral">{{ ta.statuses[item.status] }}</span>{% endif %}
+        {% if item.sync_status == "failed" %}<span class="status status--error" title="{{ item.sync_error or '' }}">{{ ta.sync_labels.failed }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="form-help">Times are in {{ ta.timezone }}.</p>
+    {% else %}
+    <p class="text-muted">No appointments yet. Book a technician for an onsite visit, remote session or call.</p>
+    {% endif %}
+  </div></div>
+</details>

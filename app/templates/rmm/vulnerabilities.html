@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% import "rmm/_vulnerability_macros.html" as vuln_ui %}
+{% block title %}Vulnerabilities{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}"><link rel="stylesheet" href="{{ static_url('/static/css/vulnerabilities.css') }}">{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Vulnerabilities</span>
+    {% if report.groups %}
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="vuln-search">Find software or a CVE</label>
+      <input id="vuln-search" type="search" class="form-input page-header-toolbar__search" placeholder="Find software or a CVE" data-vuln-search />
+      <label class="visually-hidden" for="vuln-filter">Show</label>
+      <select id="vuln-filter" class="form-input page-header-toolbar__select" data-vuln-filter>
+        <option value="">All open</option>
+        <option value="kev">Actively exploited</option>
+        <option value="critical">Critical</option>
+        <option value="high">High or critical</option>
+      </select>
+    </div>
+    {% endif %}
+  </div>
+{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions(([{"label": "Sync and mappings", "type": "link", "href": "/rmm/vulnerabilities/settings"}] if is_super_admin else []) + [{"label": "Patch management", "type": "link", "href": "/rmm/patching"}], menu_id="rmm-vulnerability-actions") }}
+{% endblock %}
+{% block content %}
+{% set summary = report.summary %}
+<div class="admin-grid vuln-page">
+  {{ counter_strip([
+    {"label": "Actively exploited", "value": summary.kev, "variant": ("danger" if summary.kev else "neutral"), "title": "Open CVEs on CISA's Known Exploited Vulnerabilities list"},
+    {"label": "Critical", "value": summary.counts.critical, "variant": ("danger" if summary.counts.critical else "neutral")},
+    {"label": "High", "value": summary.counts.high, "variant": ("warning" if summary.counts.high else "neutral")},
+    {"label": "Medium and low", "value": summary.counts.medium + summary.counts.low + summary.counts.none, "variant": "info"},
+    {"label": "Devices affected", "value": summary.devices, "variant": "neutral"},
+  ], total=summary.software, total_label="Vulnerable apps") }}
+
+  {% if not report.state.nvd_synced_at %}
+  <div class="alert alert--info admin-grid__full" role="status">
+    Vulnerability data hasn't been downloaded yet. It syncs once a day{% if is_super_admin %}, or <a href="/rmm/vulnerabilities/settings">sync now</a>{% endif %}.
+  </div>
+  {% endif %}
+
+  <section class="card card--panel admin-grid__full" aria-labelledby="vuln-list-heading">
+    <div class="card__header"><div>
+      <h2 class="card__title" id="vuln-list-heading">Vulnerable software</h2>
+      <p class="card__subtitle">Third-party apps on this company's devices with known CVEs, worst first. Updating the app fixes every CVE listed for it. Windows and Office are covered by Windows updates; Linux distribution packages are left out because distributions patch them without changing the version.</p>
+    </div></div>
+    {% if report.groups %}
+      <ul class="vuln-list" data-vuln-list>{% for group in report.groups %}{{ vuln_ui.software_card(group, severity_labels, can_edit=can_edit, csrf_token=csrf_token) }}{% endfor %}</ul>
+      <p class="empty-state" data-vuln-no-results hidden>Nothing matches. Try another name or filter.</p>
+    {% else %}
+      <p class="empty-state">No known vulnerabilities in this company's mapped software.{% if report.state.nvd_synced_at %} Last checked <span data-utc="{{ report.state.nvd_synced_at.isoformat() if report.state.nvd_synced_at.isoformat is defined else report.state.nvd_synced_at }}Z">{{ report.state.nvd_synced_at }}</span>.{% endif %}</p>
+    {% endif %}
+  </section>
+
+  {% if report.exceptions %}
+  <section class="card card--panel admin-grid__full" aria-labelledby="vuln-exceptions-heading">
+    <div class="card__header"><div>
+      <h2 class="card__title" id="vuln-exceptions-heading">Accepted risks</h2>
+      <p class="card__subtitle">These CVEs stay listed as accepted instead of open until the exception is removed or expires.</p>
+    </div></div>
+    <ul class="vuln-exceptions">
+      {% for item in report.exceptions %}
+      <li class="vuln-exception">
+        <div>
+          <strong>{{ item.cve_id or "Every CVE" }}</strong> in {{ item.vendor }}:{{ item.product }}
+          <p class="vuln-exception__reason">{{ item.reason }}</p>
+          <span class="text-muted">{% if item.created_by_email %}By {{ item.created_by_email }} · {% endif %}{% if item.expires_at %}until <span data-utc="{{ item.expires_at.isoformat() if item.expires_at.isoformat is defined else item.expires_at }}Z">{{ item.expires_at }}</span>{% else %}no expiry{% endif %}</span>
+        </div>
+        {% if can_edit %}
+        <form method="post" action="/rmm/vulnerabilities/exceptions/{{ item.id }}/delete" data-confirm="Open these CVEs again?">
+          {% include "partials/csrf.html" %}
+          <button type="submit" class="button button--ghost button--small">Remove</button>
+        </form>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+</div>
+
+{% if can_edit %}
+<div class="modal scf-modal" id="vuln-accept-modal" role="dialog" aria-modal="true" aria-labelledby="vuln-accept-title" hidden data-vuln-accept-modal>
+  <form class="modal__panel scf-editor" method="post" action="/rmm/vulnerabilities/exceptions">
+    {% include "partials/csrf.html" %}
+    <input type="hidden" name="vendor" data-vuln-field="vendor">
+    <input type="hidden" name="product" data-vuln-field="product">
+    <input type="hidden" name="cve_id" data-vuln-field="cve">
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="scf-preview__eyebrow">Accept risk</p>
+        <h2 class="modal__title" id="vuln-accept-title" data-vuln-accept-heading>Accept the risk</h2>
+        <p class="scf-editor__subtitle">The CVE stays listed for this company as accepted, not open. Record why so others can review it.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close"></button>
+    </header>
+    <div class="modal__body">
+      <div class="form-field">
+        <label class="form-label" for="vuln-accept-reason">Why is the risk acceptable?</label>
+        <textarea class="form-input" id="vuln-accept-reason" name="reason" rows="3" maxlength="2000" required placeholder="e.g. The app only runs on an isolated lab PC and is being replaced in March."></textarea>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="vuln-accept-expiry">Review again after <span class="field-optional">optional</span></label>
+        <select class="form-input" id="vuln-accept-expiry" name="expires_days">
+          <option value="30">30 days</option>
+          <option value="90" selected>90 days</option>
+          <option value="180">6 months</option>
+          <option value="365">1 year</option>
+          <option value="">Never (until removed)</option>
+        </select>
+        <p class="form-help">When it expires, the CVE opens again if the app still has it.</p>
+      </div>
+    </div>
+    <footer class="modal__footer scf-editor__footer">
+      <span class="scf-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button button--primary">Accept risk</button>
+    </footer>
+  </form>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/vulnerabilities.js') }}" defer></script>{% endblock %}

@@ -95,6 +95,7 @@
         return (names[value('proxmox_condition')] || 'Proxmox VE') + (value('proxmox_condition') === 'guest' || value('proxmox_condition') === 'storage' || value('proxmox_condition') === 'zfs' || value('proxmox_condition') === 'node_offline' ? target : '');
       }
       case 'network': return 'Network throughput' + (value('network_interface') ? ' on ' + value('network_interface') : '');
+      case 'snmp': return value('snmp_host') ? 'SNMP ' + value('snmp_host') : 'SNMP';
       case 'script': return selectedText('check_script_id') || 'Script check';
       case 'offline': return 'Agent offline';
       default: return '';
@@ -158,6 +159,14 @@
         const directions = { in: 'received', out: 'sent', total: 'received and sent' };
         return where + ': data ' + (directions[value('network_direction')] || 'received and sent') + ' is ' + (value('network_operator') || 'above') + ' ' + (value('network_threshold') || '0') + ' Mbps' + lasting + '.';
       }
+      case 'snmp': {
+        const host = value('snmp_host') || 'the network device';
+        const oid = value('snmp_oid') || 'the OID';
+        const condition = value('snmp_condition');
+        if (condition === 'responds') return host + ' does not answer SNMP for ' + oid + lasting + '.';
+        const fails = { above: 'is above', below: 'is below', equals: 'does not equal', not_equals: 'equals', contains: 'does not contain', not_contains: 'contains' };
+        return 'SNMP ' + oid + ' on ' + host + ' ' + (fails[condition] || '') + ' ' + (value('snmp_value') || '?') + lasting + ', or the device does not answer.';
+      }
       case 'script': {
         const expect = form.querySelector('[name="script_expect"]');
         const how = expect && expect.selectedOptions[0] ? expect.selectedOptions[0].textContent.toLowerCase() : 'exit code is';
@@ -208,6 +217,17 @@
     form.querySelectorAll('[data-rmm-show]').forEach((element) => {
       element.hidden = !matches(element.getAttribute('data-rmm-show'), state);
     });
+    // SNMP: v1/v2c use a community string, v3 a user and the passwords its security level needs.
+    const snmpVersion = value('snmp_version');
+    form.querySelectorAll('[data-rmm-snmp-show]').forEach((element) => {
+      element.hidden = element.getAttribute('data-rmm-snmp-show').split(',').indexOf(snmpVersion) === -1;
+    });
+    const snmpLevel = value('snmp_security_level');
+    form.querySelectorAll('[data-rmm-snmp-level-show]').forEach((element) => {
+      element.hidden = element.getAttribute('data-rmm-snmp-level-show').split(',').indexOf(snmpLevel) === -1;
+    });
+    const snmpValue = form.querySelector('[data-rmm-snmp-value-field]');
+    if (snmpValue) snmpValue.hidden = value('snmp_condition') === 'responds';
     // The agent can only start, restart or stop a service, not install or remove one.
     const serviceFix = form.querySelector('[data-rmm-service-fix-field]');
     if (serviceFix) {
@@ -261,7 +281,17 @@
 
   form.addEventListener('change', (event) => {
     const target = event.target;
-    if (target.matches('[data-rmm-check-type], [data-rmm-service-expected], [data-rmm-program-expected], [data-rmm-program-operator], [data-rmm-proxmox-condition]')) update();
+    if (target.matches('[data-rmm-check-type], [data-rmm-service-expected], [data-rmm-program-expected], [data-rmm-program-operator], [data-rmm-proxmox-condition], [data-rmm-snmp-version], [data-rmm-snmp-level], [data-rmm-snmp-condition]')) update();
+    if (target.matches('[data-rmm-snmp-preset]')) {
+      // A preset fills in its OID, condition and limit; "Another OID" keeps what was typed.
+      const option = target.selectedOptions[0];
+      if (option && option.getAttribute('data-oid')) {
+        form.querySelector('[name="snmp_oid"]').value = option.getAttribute('data-oid');
+        form.querySelector('[name="snmp_condition"]').value = option.getAttribute('data-condition');
+        form.querySelector('[name="snmp_value"]').value = option.getAttribute('data-value') || '';
+        update();
+      }
+    }
     if (target.matches('[data-rmm-check-target-mode]')) updateSelection();
     if (target.matches('[data-rmm-check-scope]')) {
       updateSelection();

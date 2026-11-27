@@ -9,3 +9,5 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	golang.org/x/sys v0.46.0
 )
+
+require github.com/gosnmp/gosnmp v1.38.0
