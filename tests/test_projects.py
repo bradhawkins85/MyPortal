@@ -309,3 +309,26 @@ async def test_repository_queries_bind_every_value(monkeypatch):
     await repo.mark_milestone_invoiced(1, invoice_id=1, invoice_number="I", when=None)
     for sql, params in calls:
         assert sql.count("%s") == len(params), sql
+
+
+@pytest.mark.asyncio
+async def test_technician_choices_need_the_technician_role_switch(monkeypatch):
+    """Ticket access alone must not make a user a project manager or assignee choice."""
+    from app.features.projects import routes
+    from app.repositories import company_memberships
+
+    rows = [
+        {"user_id": 1, "email": "admin@msp.example", "first_name": "Ada", "last_name": "Admin",
+         "is_super_admin": 1, "permissions": None},
+        {"user_id": 2, "email": "tech@msp.example", "first_name": "Tia", "last_name": "Tech",
+         "is_super_admin": 0, "permissions": '{"menu.admin.technician": "write"}'},
+        {"user_id": 3, "email": "own@customer.example", "first_name": "Owen", "last_name": "Own",
+         "is_super_admin": 0, "permissions": '{"menu.tickets": "read"}'},
+        {"user_id": 4, "email": "all@customer.example", "first_name": "Alla", "last_name": "All",
+         "is_super_admin": 0, "permissions": '{"menu.tickets": "write"}'},
+    ]
+    monkeypatch.setattr(company_memberships.db, "fetch_all", AsyncMock(return_value=rows))
+
+    technicians = await routes._technicians()
+
+    assert technicians == [{"id": 1, "name": "Ada Admin"}, {"id": 2, "name": "Tia Tech"}]
