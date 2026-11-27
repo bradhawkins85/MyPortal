@@ -323,3 +323,28 @@ async def test_repository_queries_bind_every_value(monkeypatch):
     await repo.list_unscheduled_tickets(datetime(2026, 1, 1))
     for sql, params in calls:
         assert sql.count("%s") == len(params), sql
+
+
+@pytest.mark.asyncio
+async def test_board_lists_only_technician_role_users(monkeypatch):
+    """Ticket access alone must not put a user on the dispatch board."""
+    from app.features.scheduling import routes
+    from app.repositories import company_memberships
+
+    rows = [
+        {"user_id": 1, "email": "admin@msp.example", "first_name": "Ada", "last_name": "Admin",
+         "is_super_admin": 1, "permissions": None},
+        {"user_id": 2, "email": "tech@msp.example", "first_name": "Tia", "last_name": "Tech",
+         "is_super_admin": 0, "permissions": '{"menu.admin.technician": "write", "menu.tickets": "write"}'},
+        {"user_id": 3, "email": "own@customer.example", "first_name": "Owen", "last_name": "Own",
+         "is_super_admin": 0, "permissions": '{"menu.tickets": "read"}'},
+        {"user_id": 4, "email": "all@customer.example", "first_name": "Alla", "last_name": "All",
+         "is_super_admin": 0, "permissions": '{"menu.tickets": "write"}'},
+        {"user_id": 5, "email": "off@customer.example", "first_name": "Ned", "last_name": "None",
+         "is_super_admin": 0, "permissions": '{"menu.admin.technician": "none"}'},
+    ]
+    monkeypatch.setattr(company_memberships.db, "fetch_all", AsyncMock(return_value=rows))
+
+    technicians = await routes._technicians()
+
+    assert [tech["id"] for tech in technicians] == [1, 2]

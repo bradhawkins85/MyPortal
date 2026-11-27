@@ -26,7 +26,7 @@ from .routes import router
 
 PACK = FeaturePack(
     slug="scheduling",
-    version="1.0.0",
+    version="1.0.1",
     routers=(router,),
     background_jobs=(scheduling.sync_job,),
 )
