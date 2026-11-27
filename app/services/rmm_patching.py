@@ -23,7 +23,8 @@ DEFAULTS = {"name": "", "scope": "company", "kind": "windows", "package_id": "",
             "cron": "0 2 * * 0", "timezone": "", "target_mode": "all", "target_rules": None,
             "is_enabled": True, "categories": ["Security Updates", "Critical Updates"], "deferral_days": 0,
             "reboot_mode": "never", "active_start": 8, "active_end": 18, "reboot_delay_minutes": 15,
-            "install_missing": False, "target_release": ""}
+            "install_missing": False, "ignore_pending_reboots": False, "ignore_checksums": False,
+            "target_release": ""}
 
 # Microsoft publishes the minimum cumulative update for each enablement package.
 # These baselines apply to enablement offers; the update source can also offer a full upgrade.
@@ -118,6 +119,10 @@ def validate(payload: Mapping[str, Any], company_id: int, super_admin: bool) -> 
         settings["reboot_mode"] = mode
     else:
         settings = {"display_name": display_name, "install_missing": flag(payload.get("install_missing"))}
+        # Stored only when on, so policies saved before these options existed stay valid.
+        for key in ("ignore_pending_reboots", "ignore_checksums"):
+            if flag(payload.get(key)):
+                settings[key] = True
     try:
         cron = automation.validate_cron(payload.get("cron"))
         tz = automation.validate_timezone(payload.get("timezone"))
@@ -292,22 +297,26 @@ async def tick() -> None:
     now = utcnow()
     policies = await repo.list_policies()
     due = set()
+    # A window's run stays collectable until the policy's next window, so an
+    # offline device catches up once and never builds a backlog of repeats.
+    deadlines: list[datetime] = []
     for p in policies:
         next_at = p.get("next_run_at")
         if isinstance(next_at, str):
             next_at = datetime.fromisoformat(next_at)
         if p["is_enabled"] and next_at and next_at <= now:
-            if await repo.claim(p, automation.next_run_after(p["cron"], p["timezone"], after=now)):
-                # Do not run a maintenance window missed by more than an hour.
-                if now - next_at < timedelta(hours=1):
-                    due.add(int(p["id"]))
+            following = automation.next_run_after(p["cron"], p["timezone"], after=now)
+            if await repo.claim(p, following):
+                due.add(int(p["id"]))
+                deadlines.append(following or now + timedelta(days=1))
     if not due:
         return
+    expires_at = min(deadlines)
     agents = await automation_repo.list_active_agents(company_id=None)
     applied_by_agent = await effective_for_agents(policies, agents)
     for agent in agents:
         try:
             applied = applied_by_agent[int(agent["id"])]
-            await queue(agent, applied, due, now + timedelta(minutes=15))
+            await queue(agent, applied, due, expires_at)
         except Exception:
             logger.exception("Could not queue patches for agent {}", agent["id"])

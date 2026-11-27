@@ -7,10 +7,14 @@
   ``/{id}/sync``) book, move, complete, cancel and re-sync appointments
 * ``POST /admin/schedule/settings`` (super admins) calendar sync, time zone,
   working hours and default length
-* ``/api/appointments`` (``/{id}/move`` backs dragging on the board) and
-  ``/api/tickets/{id}/appointments``
+* ``POST /admin/schedule/kinds`` (and ``/{id}``, ``/{id}/default``,
+  ``/{id}/delete``; super admins) add, rename, remove and choose the default
+  booking kind, from the schedule page's Actions menu
+* ``/api/appointments`` (``/{id}/move`` backs dragging on the board), ``/api/tickets/{id}/appointments`` and
+  ``/api/scheduling/kinds``
 * ``GET /api/scheduling/availability`` a technician's taken time on a day
-* each ticket page's Appointments card
+* each ticket page's Appointments card, which books in place and returns to
+  the ticket
 
 A background job retries Microsoft 365 calendar writes that failed and imports
 technicians' busy time (only when, never what) from their calendars, on one
@@ -29,7 +33,7 @@ from .routes import router
 
 PACK = FeaturePack(
     slug="scheduling",
-    version="1.2.0",
+    version="1.3.0",
     routers=(router,),
     background_jobs=(scheduling.sync_job,),
 )

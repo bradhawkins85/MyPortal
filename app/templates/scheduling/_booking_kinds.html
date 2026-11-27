@@ -1,0 +1,115 @@
+{#- Booking kinds (scheduling/board.html, super admins): the list and the editor, opened from the
+    page's Actions menu. static/js/scheduling_kinds.js opens them in place; without JavaScript
+    ?kinds=1 and ?kind=new|<id> load the page with one of them open. -#}
+{% set ke = kind_editing or {"id": none, "label": "", "tone": "accent", "is_default": false, "appointment_count": 0} %}
+{% set kerr = kind_errors or {} %}
+<div class="modal scf-modal" id="sch-kinds-modal" role="dialog" aria-modal="true" aria-labelledby="sch-kinds-title" {% if not kinds_open %}hidden{% endif %} data-sch-kinds-modal {% if kinds_open %}data-sch-open-on-load{% endif %}>
+  <div class="modal__panel modal__panel--wide">
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="scf-preview__eyebrow">Schedule</p>
+        <h2 class="modal__title" id="sch-kinds-title">Booking kinds</h2>
+        <p class="scf-editor__subtitle">The kinds of appointment technicians can be booked for. New bookings start with the default kind.</p>
+      </div>
+      <a href="/admin/schedule" class="modal__close" data-modal-close aria-label="Close booking kinds"></a>
+    </header>
+    <div class="modal__body">
+      <div class="sch-kinds__toolbar">
+        <label class="visually-hidden" for="sch-kinds-search">Search booking kinds</label>
+        <input class="form-input" id="sch-kinds-search" type="search" placeholder="Search booking kinds…" data-sch-kinds-search>
+        <a class="button button--primary" href="/admin/schedule?kind=new" data-sch-kind-new aria-haspopup="dialog" aria-controls="sch-kind-modal">+ Add booking kind</a>
+      </div>
+      {% if booking_kinds and booking_kinds[0].id %}
+      <ul class="scf-list sch-kinds" aria-label="Booking kinds">
+        {% for kind in booking_kinds %}
+        <li class="scf-item sch-kind{% if kind.is_archived %} scf-item--inactive{% endif %}" data-sch-kind-item data-search-text="{{ kind.label }} {{ kind.key }}">
+          <span class="sch-legend__swatch sch-block--tone-{{ kind.tone }}" aria-hidden="true"></span>
+          <div class="scf-item__main">
+            <div class="scf-item__heading">
+              <a class="scf-item__label" href="/admin/schedule?kind={{ kind.id }}" data-sch-kind-edit="{{ kind.id }}" aria-haspopup="dialog" aria-controls="sch-kind-modal">{{ kind.label }}</a>
+              <code class="scf-item__key">{{ kind.key }}</code>
+            </div>
+            <ul class="scf-item__chips" aria-label="Summary of {{ kind.label }}">
+              {% if kind.is_default %}<li class="scf-chip">Default for new bookings</li>{% endif %}
+              {% if kind.is_archived %}<li class="scf-chip scf-chip--muted">Archived: not offered for new bookings</li>{% endif %}
+              <li class="scf-chip scf-chip--muted">{{ tones.get(kind.tone, "Blue") }}</li>
+              <li class="scf-chip scf-chip--muted">{% if kind.appointment_count %}{{ kind.appointment_count }} appointment{{ "s" if kind.appointment_count != 1 }}{% else %}Not used yet{% endif %}</li>
+            </ul>
+          </div>
+          <div class="scf-item__actions sch-kind__actions">
+            {% if not kind.is_default %}
+            <form method="post" action="/admin/schedule/kinds/{{ kind.id }}/default">{% include "partials/csrf.html" %}<button type="submit" class="button button--ghost button--small">{{ "Restore as default" if kind.is_archived else "Make default" }}</button></form>
+            {% endif %}
+            <a class="button button--ghost button--small" href="/admin/schedule?kind={{ kind.id }}" data-sch-kind-edit="{{ kind.id }}" aria-haspopup="dialog" aria-controls="sch-kind-modal">{{ "Restore" if kind.is_archived else "Edit" }}</a>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      <p class="empty-state" data-sch-kinds-empty hidden>No booking kinds match your search.</p>
+      {% else %}
+      <p class="empty-state">Booking kinds can be changed once the database has been updated. Until then the built-in kinds are used.</p>
+      {% endif %}
+    </div>
+    <footer class="modal__footer">
+      <span class="scf-editor__spacer"></span>
+      <a href="/admin/schedule" class="button button--ghost" data-modal-close>Close</a>
+    </footer>
+  </div>
+</div>
+
+<div class="modal scf-modal" id="sch-kind-modal" role="dialog" aria-modal="true" aria-labelledby="sch-kind-title" {% if kind_editing is none %}hidden{% endif %} data-sch-kind-modal {% if kind_editing is not none %}data-sch-open-on-load{% endif %}>
+  <form class="modal__panel modal__panel--wide scf-editor" method="post" action="/admin/schedule/kinds{% if ke.id %}/{{ ke.id }}{% endif %}" data-sch-kind-form novalidate>
+    {% include "partials/csrf.html" %}
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="scf-preview__eyebrow">Booking kind</p>
+        <h2 class="modal__title" id="sch-kind-title" data-sch-kind-title>{{ "Edit booking kind" if ke.id else "Add booking kind" }}</h2>
+        <p class="scf-editor__subtitle">A kind of appointment, such as an onsite visit or a phone call.</p>
+      </div>
+      <a href="/admin/schedule?kinds=1" class="modal__close" data-modal-close aria-label="Close booking kind editor"></a>
+    </header>
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main">
+        {% if kerr %}<div class="alert alert--error" role="alert">Check the highlighted fields.</div>{% endif %}
+        <div class="form-field">
+          <label class="form-label" for="sch-kind-label">Name</label>
+          <input class="form-input" id="sch-kind-label" name="label" maxlength="80" required value="{{ ke.label }}" placeholder="e.g. Workshop repair" autocomplete="off">
+          <p class="form-help">Shown in the booking editor, on the dispatch board and in the technician's calendar.</p>
+          <p class="form-help form-help--error" data-sch-kind-error="label" {% if not kerr.label %}hidden{% endif %}>{{ kerr.label or "Give the booking kind a name." }}</p>
+        </div>
+        <fieldset class="sch-fieldset">
+          <legend class="form-label">Colour on the board</legend>
+          <div class="scf-type-grid sch-tones">
+            {% for key, label in tones.items() %}
+            <label class="scf-type-card"><input type="radio" name="tone" value="{{ key }}" {% if ke.tone == key %}checked{% endif %}><span class="sch-legend__swatch sch-block--tone-{{ key }}" aria-hidden="true"></span><span class="scf-type-card__label">{{ label }}</span></label>
+            {% endfor %}
+          </div>
+          {% if kerr.tone %}<p class="form-help form-help--error">{{ kerr.tone }}</p>{% endif %}
+        </fieldset>
+        <label class="sch-kind-default">
+          <input type="checkbox" name="is_default" value="1" {% if ke.is_default %}checked disabled{% endif %} data-sch-kind-default>
+          Start new bookings with this kind
+        </label>
+        <p class="form-help" data-sch-kind-default-help {% if not ke.is_default %}hidden{% endif %}>This is the default. To change it, make another kind the default.</p>
+      </div>
+      <aside class="scf-preview" aria-label="Preview">
+        <p class="scf-preview__eyebrow">On the board</p>
+        <div class="sch-kind-preview">
+          <span class="sch-block sch-block--tone-{{ ke.tone }}" data-sch-kind-preview>
+            <span class="sch-block__time">09:00–10:00</span>
+            <span class="sch-block__title" data-sch-kind-preview-label>{{ ke.label or "New booking kind" }}</span>
+          </span>
+        </div>
+        <p class="sch-preview" data-sch-kind-summary role="status" aria-live="polite">{% if ke.appointment_count %}Used by {{ ke.appointment_count }} appointment{{ "s" if ke.appointment_count != 1 }}. Renaming it changes their label too.{% else %}Not used by any appointment yet.{% endif %}</p>
+      </aside>
+    </div>
+    <footer class="modal__footer scf-editor__footer">
+      <button type="submit" form="sch-kind-delete-form" class="button button--danger" data-sch-kind-delete {% if not ke.id or ke.is_default %}hidden{% endif %}>{{ "Archive" if ke.appointment_count else "Delete" }}</button>
+      <span class="scf-editor__spacer"></span>
+      <a href="/admin/schedule?kinds=1" class="button button--ghost" data-modal-close>Cancel</a>
+      <button type="submit" class="button button--primary">Save</button>
+    </footer>
+  </form>
+  <form id="sch-kind-delete-form" method="post" action="/admin/schedule/kinds/{{ ke.id or 0 }}/delete" data-confirm="Remove this booking kind? If appointments use it, it is archived instead so they keep their label.">{% include "partials/csrf.html" %}</form>
+</div>
+<script id="sch-kinds-data" type="application/json">{{ booking_kinds | tojson }}</script>

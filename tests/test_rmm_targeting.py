@@ -428,3 +428,45 @@ def test_compilation_rejects_corrupt_or_branch(context):
     rules = group(condition("company.vip", value=True), condition("unknown", value="x"), operator="or")
     with pytest.raises(ValueError):
         compile_rules(rules)
+
+
+def test_vulnerability_fields_are_offered_in_their_own_group():
+    fields = {field["key"]: field for field in field_catalogue()}
+    assert fields["vulnerability.has_vulnerable_software"]["type"] == "boolean"
+    assert fields["vulnerability.software"]["type"] == "list"
+    assert {fields[key]["category"] for key in ("vulnerability.has_vulnerable_software",
+                                                "vulnerability.software")} == {"Vulnerabilities"}
+    assert "key" not in validate_rules(group(condition("vulnerability.software", "contains", "chrome")))["children"][0]
+
+
+def test_device_vulnerability_rules_match_open_findings(context):
+    context["vulnerability"] = {"has_vulnerable_software": True}
+    context["vulnerable_software"] = ["Google Chrome", "7-Zip 23.01 (x64)"]
+    assert matches_rules(group(condition("vulnerability.has_vulnerable_software", value=True)), context)
+    assert not matches_rules(group(condition("vulnerability.has_vulnerable_software", value=False)), context)
+    assert matches_rules(group(condition("vulnerability.software", "contains", "chrome")), context)
+    assert matches_rules(group(condition("vulnerability.software", "equals", "google chrome")), context)
+    assert matches_rules(group(condition("vulnerability.software", "starts_with", "7-zip")), context)
+    assert not matches_rules(group(condition("vulnerability.software", "not_contains", "chrome")), context)
+    assert not matches_rules(group(condition("vulnerability.software", "contains", "firefox")), context)
+
+
+def test_device_without_open_findings_matches_negative_vulnerability_rules(context):
+    context["vulnerability"] = {"has_vulnerable_software": False}
+    context["vulnerable_software"] = []
+    assert matches_rules(group(condition("vulnerability.has_vulnerable_software", value=False)), context)
+    assert matches_rules(group(condition("vulnerability.software", "not_contains", "chrome")), context)
+    assert matches_rules(group(condition("vulnerability.software", "is_not_set")), context)
+    assert not matches_rules(group(condition("vulnerability.software", "contains", "chrome")), context)
+
+
+@pytest.mark.parametrize("rule", [
+    condition("vulnerability.has_vulnerable_software", value=False),
+    condition("vulnerability.has_vulnerable_software", value=True),
+    condition("vulnerability.software", "not_contains", "chrome"),
+    condition("vulnerability.software", "contains", "chrome"),
+])
+def test_unknown_vulnerability_inventory_never_matches(context, rule):
+    context["vulnerability"] = {"has_vulnerable_software": None}
+    context["vulnerable_software"] = None
+    assert not matches_rules(group(rule), context)

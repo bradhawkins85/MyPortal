@@ -111,6 +111,8 @@ Examples:
 * **WireGuard with a custom field**: an AND group with installed software containing
   `WireGuard` and the asset custom field `VPNEnabled` equal to `true`.
 * **Either device population**: put those two AND groups inside an OR group.
+* **Devices exposed through Chrome**: installed app with vulnerabilities containing
+  `Chrome`. Combine it with a Chrome patch policy or a remediation task.
 * **Large customer Windows fleet**: company active agent count at least `25`, a
   company variable `ServiceTier` equal to `Premium`, RAM at least `16` GB, and
   recorded asset IP in `10.50.0.0/16`, all joined with AND.
@@ -119,8 +121,13 @@ Fields cover company identity, VIP status, tags and variables; asset identity,
 catalogue type, tags and custom fields; hardware manufacturer/model, CPU and core
 counts, RAM and storage; OS name/version/build; agent architecture/version and
 check-in IP; recorded device IPs; and installed software names, versions and
-publishers. Software version/publisher conditions specify the software name so
-they compare the same installed package. Custom fields and company variables
+publishers; and vulnerabilities: **Device has vulnerable software** and
+**Installed app with vulnerabilities** (the installed app name of each open
+vulnerability finding). Software version/publisher conditions specify the software name so
+they compare the same installed package. Vulnerability conditions use open findings
+from [RMM Vulnerabilities](RMM%20Vulnerabilities.md): accepted findings
+(exceptions) and resolved ones do not count, and a device whose software inventory
+is unknown matches neither yes nor no. Custom fields and company variables
 accept definition names or IDs (numeric keys refer to definition IDs).
 
 Text comparisons ignore case. Numeric conditions support comparisons and

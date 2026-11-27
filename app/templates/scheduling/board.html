@@ -21,10 +21,23 @@
 {% endblock %}
 
 {% block header_actions %}
-  {{ page_header_actions([
+  {% set actions = [
     {"label": "+ Book appointment", "type": "link", "variant": "primary", "href": "/admin/schedule?new=1&date=" ~ day.isoformat(), "attrs": {"data-sch-open": "", "aria-haspopup": "dialog", "aria-controls": "sch-modal"}},
     {"label": "My schedule", "type": "link", "href": "/admin/schedule/me"}
-  ]) }}
+  ] %}
+  {% if can_manage %}
+    {% set default_items = [] %}
+    {% for kind in legend_kinds %}
+      {% set _ = default_items.append({"label": ("✓ " if kind.is_default else "") ~ kind.label, "type": "form", "action": "/admin/schedule/kinds/" ~ kind.id ~ "/default", "attrs": {"aria-current": "true" if kind.is_default else none}}) %}
+    {% endfor %}
+    {% set _ = actions.extend([
+      {"type": "section", "label": "Booking kinds"},
+      {"label": "Manage booking kinds", "type": "link", "href": "/admin/schedule?kinds=1", "attrs": {"data-sch-kinds-open": "", "aria-haspopup": "dialog", "aria-controls": "sch-kinds-modal"}},
+      {"label": "+ Add booking kind", "type": "link", "href": "/admin/schedule?kind=new", "attrs": {"data-sch-kind-new": "", "aria-haspopup": "dialog", "aria-controls": "sch-kind-modal"}},
+    ]) %}
+    {% if default_items and legend_kinds[0].id %}{% set _ = actions.append({"type": "submenu", "label": "Default booking kind", "items": default_items}) %}{% endif %}
+  {% endif %}
+  {{ page_header_actions(actions, menu_id="sch-actions-menu") }}
 {% endblock %}
 
 {% block content %}
@@ -59,7 +72,7 @@
           {% for band in row.busy %}<span class="sch-busy" style="left: {{ band.left }}%; width: {{ band.width }}%" data-sch-busy title="Unavailable · {{ band.when }}"><span class="visually-hidden">{{ row.name }} unavailable {{ band.start_label }}–{{ band.end_label }}</span><span class="sch-busy__label" aria-hidden="true">Unavailable</span></span>{% endfor %}
           {% if board.now_left is not none %}<span class="sch-row__now" style="left: {{ board.now_left }}%" aria-hidden="true"></span>{% endif %}
           {% for item in row["items"] %}
-          <a class="sch-block sch-block--{{ item.kind }} sch-block--{{ item.status }}{% if item.sync_status == 'failed' %} sch-block--sync-failed{% endif %}" style="left: {{ item.left }}%; width: {{ item.width }}%; --sch-lane: {{ item.lane }}" href="/admin/schedule?date={{ day.isoformat() }}&amp;appointment={{ item.id }}"{% if item.status == "scheduled" and not item.starts_before and not item.ends_after %} data-sch-move="{{ item.id }}" data-start="{{ item.start_label }}" data-duration="{{ item.duration_minutes }}" aria-describedby="sch-move-help"{% endif %} title="{{ item.kind_label }} · {{ item.when }} · {{ item.company_name or '' }} · #{{ item.ticket_number or item.ticket_id }} {{ item.ticket_subject or '' }}">
+          <a class="sch-block sch-block--tone-{{ item.kind_tone }} sch-block--{{ item.status }}{% if item.sync_status == 'failed' %} sch-block--sync-failed{% endif %}" style="left: {{ item.left }}%; width: {{ item.width }}%; --sch-lane: {{ item.lane }}" href="/admin/schedule?date={{ day.isoformat() }}&amp;appointment={{ item.id }}"{% if item.status == "scheduled" and not item.starts_before and not item.ends_after %} data-sch-move="{{ item.id }}" data-start="{{ item.start_label }}" data-duration="{{ item.duration_minutes }}" aria-describedby="sch-move-help"{% endif %} title="{{ item.kind_label }} · {{ item.when }} · {{ item.company_name or '' }} · #{{ item.ticket_number or item.ticket_id }} {{ item.ticket_subject or '' }}">
             <span class="sch-block__time">{{ item.start_label }}–{{ item.end_label }}</span>
             <span class="sch-block__title">#{{ item.ticket_number or item.ticket_id }} {{ item.company_name or item.ticket_subject or '' }}</span>
           </a>
@@ -71,7 +84,7 @@
       <p class="visually-hidden" id="sch-move-help">Drag to move. To move with the keyboard, open the appointment and change its technician, date or start time.</p>
       <p class="sch-board__status" data-sch-move-status role="status" aria-live="polite"></p>
       <ul class="sch-legend" aria-label="Key">
-        {% for key, label in kinds.items() %}<li><span class="sch-legend__swatch sch-block--{{ key }}" aria-hidden="true"></span>{{ label }}</li>{% endfor %}
+        {% for kind in legend_kinds %}<li><span class="sch-legend__swatch sch-block--tone-{{ kind.tone }}" aria-hidden="true"></span>{{ kind.label }}</li>{% endfor %}
         <li><span class="sch-legend__swatch sch-block--completed" aria-hidden="true"></span>Done</li>
         {% if settings.calendar_sync %}<li><span class="sch-legend__swatch sch-legend__swatch--busy" aria-hidden="true"></span>Unavailable in their calendar</li>{% endif %}
       </ul>
@@ -143,6 +156,7 @@
   {% endif %}
 </div>
 {% include "scheduling/_appointment_editor.html" %}
+{% if can_manage %}{% include "scheduling/_booking_kinds.html" %}{% endif %}
 {% endblock %}
 
-{% block scripts %}<script src="{{ static_url('/static/js/scheduling.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/scheduling.js') }}" defer></script>{% if can_manage %}<script src="{{ static_url('/static/js/scheduling_kinds.js') }}" defer></script>{% endif %}{% endblock %}

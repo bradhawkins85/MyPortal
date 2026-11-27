@@ -50,6 +50,7 @@ async def target_db(sqlite_db, monkeypatch):
             await sqlite_db.execute(f"ALTER TABLE assets ADD COLUMN {name} {kind}")
     await sqlite_db.execute("CREATE TABLE IF NOT EXISTS ip_addresses (id INTEGER PRIMARY KEY, company_id INT, asset_id INT, address TEXT)")
     await sqlite_db.execute("CREATE TABLE IF NOT EXISTS asset_interfaces (id INTEGER PRIMARY KEY, company_id INT, asset_id INT, ip_address_id INT)")
+    await sqlite_db.execute("CREATE TABLE IF NOT EXISTS vuln_findings (id INTEGER PRIMARY KEY, agent_id INT, company_id INT, software_name TEXT, status TEXT)")
 
     async def execute_many(sql, rows):
         await sqlite_db.conn.executemany(sqlite_db._sql(sql), list(rows))

@@ -249,6 +249,79 @@
 .sch-legend__swatch.sch-block--meeting { border-left-color: var(--hf-line-strong); }
 .sch-legend__swatch.sch-block--completed { opacity: 0.6; }
 
+/* Booking kind colours (booking_kinds.tone). */
+.sch-block--tone-accent,
+.sch-legend__swatch.sch-block--tone-accent { border-left-color: var(--hf-accent-strong); }
+.sch-block--tone-warning,
+.sch-legend__swatch.sch-block--tone-warning { border-left-color: var(--hf-warning); }
+.sch-block--tone-success,
+.sch-legend__swatch.sch-block--tone-success { border-left-color: var(--hf-success); }
+.sch-block--tone-danger,
+.sch-legend__swatch.sch-block--tone-danger { border-left-color: var(--hf-danger); }
+.sch-block--tone-neutral,
+.sch-legend__swatch.sch-block--tone-neutral { border-left-color: var(--hf-line-strong); }
+
+.sch-kinds__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-gap-base);
+  align-items: center;
+  margin-bottom: var(--space-gap-base);
+}
+
+.sch-kinds__toolbar .form-input {
+  flex: 1 1 14rem;
+}
+
+.sch-kind {
+  align-items: center;
+}
+
+.sch-kind__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-gap-tight);
+  justify-content: flex-end;
+}
+
+.sch-kind__actions form {
+  margin: 0;
+}
+
+.sch-tones .scf-type-card {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sch-kind-default {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: var(--space-gap-base);
+}
+
+.sch-kind-preview {
+  position: relative;
+  min-height: 3rem;
+  margin-bottom: var(--space-gap-base);
+}
+
+.sch-kind-preview .sch-block {
+  --sch-lane-height: 2.8rem;
+  position: static;
+  display: flex;
+  width: 100%;
+  cursor: default;
+}
+
+.sch-ticket-fixed {
+  margin: 0;
+  padding: 0.5rem 0;
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
 .sch-waiting,
 .sch-agenda,
 .ticket-appointments {
@@ -365,6 +438,10 @@
   .sch-board {
     --sch-name-width: 7rem;
   }
+}
+
+[data-sch-kinds-empty][hidden] {
+  display: none;
 }
 
 /* Time a technician's own calendar shows them busy. No event details are shown. */

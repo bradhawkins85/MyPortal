@@ -1,18 +1,23 @@
-{#- Book or change an appointment (scheduling/board.html). static/js/scheduling.js opens it in
-    place and keeps the summary up to date; without JavaScript it opens on its own page load. -#}
-{% set e = editing or {"kind": "onsite", "date": day.isoformat(), "start_time": "09:00", "duration_minutes": settings.default_duration_minutes, "status": "scheduled"} %}
+{#- Book or change an appointment (scheduling/board.html and the ticket page's Appointments card).
+    static/js/scheduling.js opens it in place and keeps the summary up to date; without JavaScript
+    it opens on its own page load. On the ticket page (sch_ticket set) the ticket is fixed, and
+    booking returns to the ticket. -#}
+{% set sch_ticket = sch_ticket if sch_ticket is defined else none %}
+{% set close_href = sch_close_href if sch_close_href is defined and sch_close_href else "/admin/schedule?date=" ~ day.isoformat() %}
+{% set e = editing or {"kind": default_kind, "date": day.isoformat(), "start_time": "09:00", "duration_minutes": settings.default_duration_minutes, "status": "scheduled", "ticket_id": sch_ticket.id if sch_ticket else none, "ticket_label": sch_ticket.label if sch_ticket else none, "technician_user_id": sch_ticket.technician_id if sch_ticket else none} %}
 {% set err = errors or {} %}
+{% set back = (editing.return_to if editing and editing.return_to else none) or (sch_return_to if sch_return_to is defined and sch_return_to else "/admin/schedule?date=" ~ (e.date or day.isoformat())) %}
 <div class="modal scf-modal" id="sch-modal" role="dialog" aria-modal="true" aria-labelledby="sch-modal-title" {% if not editing %}hidden{% endif %} data-sch-modal {% if editing %}data-sch-open-on-load{% endif %}>
   <form class="modal__panel modal__panel--wide scf-editor" method="post" action="/admin/schedule/appointments{% if e.id %}/{{ e.id }}{% endif %}" data-sch-form novalidate>
     {% include "partials/csrf.html" %}
-    <input type="hidden" name="return_to" value="/admin/schedule?date={{ e.date or day.isoformat() }}">
+    <input type="hidden" name="return_to" value="{{ back }}">
     <header class="modal__header scf-editor__header">
       <div>
         <p class="scf-preview__eyebrow">Appointment</p>
         <h2 class="modal__title" id="sch-modal-title">{{ "Change appointment" if e.id else "Book appointment" }}</h2>
         <p class="scf-editor__subtitle">{% if e.ticket_label %}{{ e.ticket_label }}{% else %}Book a technician for a ticket.{% endif %}</p>
       </div>
-      <a href="/admin/schedule?date={{ day.isoformat() }}" class="modal__close" data-modal-close aria-label="Close appointment editor"></a>
+      <a href="{{ close_href }}" class="modal__close" data-modal-close aria-label="Close appointment editor"></a>
     </header>
     <div class="modal__body scf-editor__body" data-sch-appointment="{{ e.id or '' }}">
       <div class="scf-editor__main">
@@ -20,6 +25,13 @@
         <div class="alert alert--warning" role="alert">{{ err.conflict }}</div>
         {% elif err %}<div class="alert alert--error" role="alert">Check the highlighted fields.</div>{% endif %}
         <div class="scf-grid">
+          {% if sch_ticket %}
+          <div class="form-field">
+            <span class="form-label">Ticket</span>
+            <input type="hidden" name="ticket_id" value="{{ sch_ticket.id }}">
+            <p class="sch-ticket-fixed" data-sch-ticket-label>{{ sch_ticket.label }}</p>
+          </div>
+          {% else %}
           <div class="form-field">
             <label class="form-label" for="sch-ticket">Ticket</label>
             <input class="form-input" id="sch-ticket" name="ticket_id" inputmode="numeric" list="sch-ticket-options" value="{{ e.ticket_id or '' }}" placeholder="Ticket ID" required autocomplete="off" data-sch-input>
@@ -27,6 +39,7 @@
             <p class="form-help">Type to pick from tickets waiting to be scheduled, or enter any ticket's ID.</p>
             {% if err.ticket_id %}<p class="form-help form-help--error">{{ err.ticket_id }}</p>{% endif %}
           </div>
+          {% endif %}
           <div class="form-field">
             <label class="form-label" for="sch-tech">Technician</label>
             <select class="form-input" id="sch-tech" name="technician_user_id" required data-sch-input>
@@ -40,7 +53,7 @@
           <legend class="form-label">Kind</legend>
           <div class="scf-type-grid sch-kinds">
             {% for key, label in kinds.items() %}
-            <label class="scf-type-card"><input type="radio" name="kind" value="{{ key }}" {% if (e.kind or "onsite") == key %}checked{% endif %} data-sch-input><span class="scf-type-card__label">{{ label }}</span></label>
+            <label class="scf-type-card"><input type="radio" name="kind" value="{{ key }}" {% if (e.kind or default_kind) == key %}checked{% endif %} data-sch-input><span class="scf-type-card__label">{{ label }}</span></label>
             {% endfor %}
           </div>
         </fieldset>
@@ -103,7 +116,7 @@
       {% endif %}
       {% if e.id and e.sync_status == "failed" %}<button type="submit" form="sch-sync-form" class="button button--ghost">Retry calendar</button>{% endif %}
       <span class="scf-editor__spacer"></span>
-      <a href="/admin/schedule?date={{ day.isoformat() }}" class="button button--ghost" data-modal-close>Close</a>
+      <a href="{{ close_href }}" class="button button--ghost" data-modal-close>Close</a>
       <button type="submit" class="button button--primary">{{ "Save changes" if e.id else "Book" }}</button>
     </footer>
   </form>

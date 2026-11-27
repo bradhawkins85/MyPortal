@@ -59,9 +59,28 @@ def _audit(values: dict[str, Any]) -> dict[str, Any]:
     return {key: value.isoformat() if isinstance(value, (datetime, date)) else value for key, value in values.items()}
 
 
+def _editor_kinds(editing: dict[str, Any] | None) -> dict[str, str]:
+    """Kinds offered in the booking editor, plus an archived kind the appointment already uses."""
+
+    kinds = scheduling.active_kinds()
+    current = str((editing or {}).get("kind") or "")
+    if current and current not in kinds and current in scheduling.KINDS:
+        kinds[current] = scheduling.KINDS[current] + " (archived)"
+    return kinds
+
+
+def _kind_json(kind: dict[str, Any]) -> dict[str, Any]:
+    return {"id": kind.get("id"), "key": kind["kind_key"], "label": kind["label"], "tone": kind.get("tone") or "accent",
+            "is_default": bool(kind.get("is_default")), "is_archived": bool(kind.get("is_archived")),
+            "appointment_count": int(kind.get("appointment_count") or 0)}
+
+
 async def _render_board(request: Request, user: dict[str, Any], *, day: date, editing: dict[str, Any] | None = None,
-                        errors: dict[str, str] | None = None, status_code: int = status.HTTP_200_OK):
+                        errors: dict[str, str] | None = None, status_code: int = status.HTTP_200_OK,
+                        kinds_open: bool = False, kind_editing: dict[str, Any] | None = None,
+                        kind_errors: dict[str, str] | None = None):
     settings = await scheduling.load_settings()
+    booking_kinds = [_kind_json(kind) for kind in await scheduling.refresh_kinds()]
     technicians = await _technicians()
     start, end = scheduling.day_window(day, settings)
     appointments = await repo.list_between(start, end)
@@ -85,7 +104,14 @@ async def _render_board(request: Request, user: dict[str, Any], *, day: date, ed
             "settings": settings,
             "technicians": [{"id": tech["id"], "name": scheduling.technician_name(tech)} for tech in technicians],
             "unscheduled": unscheduled,
-            "kinds": scheduling.KINDS,
+            "kinds": _editor_kinds(editing),
+            "legend_kinds": [kind for kind in booking_kinds if not kind["is_archived"]],
+            "default_kind": scheduling.default_kind(),
+            "booking_kinds": booking_kinds,
+            "tones": scheduling.TONES,
+            "kinds_open": kinds_open,
+            "kind_editing": kind_editing,
+            "kind_errors": kind_errors or {},
             "statuses": scheduling.STATUSES,
             "durations": scheduling.DURATIONS,
             "sync_labels": scheduling.SYNC_LABELS,
@@ -111,12 +137,27 @@ async def board_page(
     ticket_id: int | None = Query(default=None, ge=1),
     technician_id: int | None = Query(default=None, ge=1),
     start: str | None = Query(default=None, max_length=5),
+    kinds: bool = Query(default=False, description="Open the booking kinds list (super admins)"),
+    kind: str | None = Query(default=None, max_length=12, description="'new' or a booking kind's ID to edit"),
+    return_to: str | None = Query(default=None, max_length=200, description="Where to go once the booking is made"),
 ):
     user, redirect = await _main()._require_helpdesk_page(request)
     if redirect:
         return redirect
     settings = await scheduling.load_settings()
     selected = _parse_day(day, settings)
+    kind_editing = None
+    if kind and user.get("is_super_admin"):
+        if kind == "new":
+            kind_editing = {"id": None, "label": "", "tone": "accent", "is_default": False, "appointment_count": 0}
+        else:
+            record = await repo.get_kind(_optional_int(kind) or 0)
+            if not record:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking kind not found")
+            kind_editing = _kind_json(record)
+    if kind_editing is not None or kinds:
+        return await _render_board(request, user, day=selected, kinds_open=bool(kinds and user.get("is_super_admin")),
+                                   kind_editing=kind_editing)
     editing = None
     if appointment is not None:
         record = await repo.get(appointment)
@@ -135,6 +176,7 @@ async def board_page(
             ticket = await tickets_repo.get_ticket(ticket_id)
             if ticket:
                 editing["ticket_label"] = f"#{ticket.get('ticket_number') or ticket_id} {ticket.get('subject') or ''}"
+        editing["return_to"] = _back({"return_to": return_to}, "") or None
     return await _render_board(request, user, day=selected, editing=editing)
 
 
@@ -196,7 +238,7 @@ async def _save(request: Request, appointment_id: int | None):
                                               "duration_minutes", "location", "notes", "status")}
     posted.update(id=appointment_id, ticket_id=_optional_int(posted["ticket_id"]),
                   technician_user_id=_optional_int(posted["technician_user_id"]),
-                  duration_minutes=_optional_int(posted["duration_minutes"]))
+                  duration_minutes=_optional_int(posted["duration_minutes"]), return_to=_back(form, ""))
     day = _parse_day(str(form.get("date") or ""), settings)
     try:
         values = scheduling.parse_form(form, settings, technician_ids=[int(tech["id"]) for tech in technicians])
@@ -292,8 +334,118 @@ async def save_settings(request: Request):
     return flash_redirect(PAGE_PATH + "#schedule-settings", message, "success")
 
 
+# --------------------------------------------------------------------------- #
+# Booking kinds (super admins)
+# --------------------------------------------------------------------------- #
+
+KINDS_PATH = PAGE_PATH + "?kinds=1"
+
+
+async def _save_kind(request: Request, kind_id: int | None):
+    user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    existing = await repo.get_kind(kind_id) if kind_id is not None else None
+    if kind_id is not None and not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking kind not found")
+    form = await request.form()
+    try:
+        values = scheduling.parse_kind_form(form)
+    except scheduling.AppointmentError as exc:
+        posted = {"id": kind_id, "label": str(form.get("label") or ""), "tone": str(form.get("tone") or "accent"),
+                  "is_default": bool(form.get("is_default")),
+                  "appointment_count": (existing or {}).get("appointment_count", 0)}
+        settings = await scheduling.load_settings()
+        return await _render_board(request, user, day=datetime.now(settings.zone).date(), kind_editing=posted,
+                                   kind_errors=exc.errors, status_code=status.HTTP_400_BAD_REQUEST)
+    saved_id = await _store_kind(values, kind_id, existing)
+    await audit_service.log_action(action="scheduling.kind.save", user_id=user.get("id"), entity_type="booking_kind",
+                                   entity_id=saved_id, new_value=values, request=request)
+    return flash_redirect(KINDS_PATH, f"Saved “{values['label']}”.", "success")
+
+
+async def _store_kind(values: dict[str, Any], kind_id: int | None, existing: dict[str, Any] | None) -> int:
+    if kind_id is None:
+        taken = [kind["kind_key"] for kind in await repo.list_kinds()]
+        kind_id = await repo.create_kind(kind_key=scheduling.kind_key_for(values["label"], taken), label=values["label"],
+                                         tone=values["tone"], is_default=values["is_default"])
+    else:
+        await repo.update_kind(kind_id, label=values["label"], tone=values["tone"])
+        if values["is_default"] and not (existing or {}).get("is_default"):
+            await repo.set_default_kind(kind_id)
+    await scheduling.refresh_kinds()
+    return kind_id
+
+
+async def _remove_kind(kind: dict[str, Any]) -> str:
+    """Delete an unused kind, or archive one that appointments use. Returns "deleted" or "archived"."""
+
+    if kind["is_default"]:
+        raise scheduling.AppointmentError({"kind": "Choose another default booking kind before removing this one."})
+    active = [item for item in await repo.list_kinds() if not item["is_archived"]]
+    if not kind["is_archived"] and len(active) <= 1:
+        raise scheduling.AppointmentError({"kind": "Keep at least one booking kind."})
+    if kind["appointment_count"]:
+        await repo.archive_kind(int(kind["id"]))
+        outcome = "archived"
+    else:
+        await repo.delete_kind(int(kind["id"]))
+        outcome = "deleted"
+    await scheduling.refresh_kinds()
+    return outcome
+
+
+@router.post(PAGE_PATH + "/kinds", response_class=HTMLResponse, summary="Add a booking kind")
+async def create_kind(request: Request):
+    return await _save_kind(request, None)
+
+
+@router.post(PAGE_PATH + "/kinds/{kind_id:int}", response_class=HTMLResponse, summary="Update a booking kind")
+async def update_kind(kind_id: int, request: Request):
+    return await _save_kind(request, kind_id)
+
+
+@router.post(PAGE_PATH + "/kinds/{kind_id:int}/default", response_class=HTMLResponse,
+             summary="Make a booking kind the default for new bookings")
+async def default_kind(kind_id: int, request: Request):
+    user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    kind = await repo.get_kind(kind_id)
+    if not kind:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking kind not found")
+    await repo.set_default_kind(kind_id)
+    await scheduling.refresh_kinds()
+    await audit_service.log_action(action="scheduling.kind.default", user_id=user.get("id"), entity_type="booking_kind",
+                                   entity_id=kind_id, request=request)
+    form = await request.form()
+    return flash_redirect(_back(form, KINDS_PATH), f"New bookings now start as “{kind['label']}”.", "success")
+
+
+@router.post(PAGE_PATH + "/kinds/{kind_id:int}/delete", response_class=HTMLResponse, summary="Delete a booking kind")
+async def delete_kind(kind_id: int, request: Request):
+    user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    kind = await repo.get_kind(kind_id)
+    if not kind:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking kind not found")
+    try:
+        outcome = await _remove_kind(kind)
+    except scheduling.AppointmentError as exc:
+        return flash_redirect(KINDS_PATH, str(exc), "error")
+    await audit_service.log_action(action=f"scheduling.kind.{outcome}", user_id=user.get("id"),
+                                   entity_type="booking_kind", entity_id=kind_id, request=request)
+    message = (f"Deleted “{kind['label']}”." if outcome == "deleted" else
+               f"Archived “{kind['label']}”: its {kind['appointment_count']} appointment(s) keep it, "
+               "but it is no longer offered for new bookings.")
+    return flash_redirect(KINDS_PATH, message, "success")
+
+
 async def ticket_appointments_context(ticket_id: int) -> dict[str, Any]:
-    """The ticket page's Appointments card."""
+    """The ticket page's Appointments card and its booking editor."""
+
+    from app.repositories import tickets as tickets_repo
 
     settings = await scheduling.load_settings()
     items = []
@@ -303,8 +455,21 @@ async def ticket_appointments_context(ticket_id: int) -> dict[str, Any]:
                       "technician": scheduling.technician_name(appointment),
                       "day": scheduling.to_local(appointment["starts_at"], settings.zone).date().isoformat()})
     upcoming = [item for item in items if item["status"] == "scheduled"]
+    ticket = await tickets_repo.get_ticket(ticket_id) or {}
+    technicians = await _technicians()
+    technician_ids = {int(tech["id"]) for tech in technicians}
+    assigned = _optional_int(ticket.get("assigned_user_id"))
     return {"items": items, "upcoming": len(upcoming), "timezone": settings.timezone,
-            "sync_labels": scheduling.SYNC_LABELS, "statuses": scheduling.STATUSES}
+            "sync_labels": scheduling.SYNC_LABELS, "statuses": scheduling.STATUSES,
+            # The booking editor, opened in place on the ticket page.
+            "settings": settings, "day": datetime.now(settings.zone).date(),
+            "technicians": [{"id": tech["id"], "name": scheduling.technician_name(tech)} for tech in technicians],
+            "kinds": scheduling.active_kinds(), "default_kind": scheduling.default_kind(),
+            "durations": scheduling.DURATIONS,
+            "ticket": {"id": ticket_id,
+                       "label": f"#{ticket.get('ticket_number') or ticket_id} {ticket.get('subject') or ''}".strip(),
+                       "technician_id": assigned if assigned in technician_ids else None},
+            "return_to": f"/admin/tickets/{ticket_id}"}
 
 
 # --------------------------------------------------------------------------- #
@@ -315,7 +480,8 @@ async def ticket_appointments_context(ticket_id: int) -> dict[str, Any]:
 class AppointmentIn(BaseModel):
     ticket_id: int
     technician_user_id: int
-    kind: str = Field(default="onsite", description="onsite, remote, phone or meeting")
+    kind: str | None = Field(default=None, description="A booking kind's key (GET /api/scheduling/kinds); "
+                                                    "the default kind when left out")
     date: DateType = Field(description="Local date in the scheduling time zone")
     start_time: str = Field(description="Local start time, HH:MM", pattern=r"^\d{2}:\d{2}$")
     duration_minutes: int = Field(ge=5, le=scheduling.MAX_DURATION_MINUTES)
@@ -445,6 +611,57 @@ async def api_cancel(appointment_id: int, request: Request,
     await audit_service.log_action(action="appointment.cancelled", user_id=user.get("id"), entity_type="appointment",
                                    entity_id=appointment_id, request=request)
     return _api_appointment(saved or {}, settings)
+
+
+class BookingKindIn(BaseModel):
+    label: str = Field(min_length=1, max_length=scheduling.MAX_KIND_LABEL)
+    tone: str = Field(default="accent", description="accent, warning, success, danger or neutral")
+    is_default: bool = Field(default=False, description="Start new bookings with this kind")
+
+
+@router.get("/api/scheduling/kinds", summary="Booking kinds")
+async def api_list_kinds(_: dict = Depends(require_helpdesk_technician)) -> list[dict[str, Any]]:
+    return [_kind_json(kind) for kind in await scheduling.refresh_kinds()]
+
+
+@router.post("/api/scheduling/kinds", summary="Add a booking kind", status_code=status.HTTP_201_CREATED)
+async def api_create_kind(payload: BookingKindIn, request: Request,
+                          user: dict = Depends(require_super_admin)) -> dict[str, Any]:
+    return await _api_save_kind(payload, request, user, None)
+
+
+@router.put("/api/scheduling/kinds/{kind_id}", summary="Update a booking kind")
+async def api_update_kind(kind_id: int, payload: BookingKindIn, request: Request,
+                          user: dict = Depends(require_super_admin)) -> dict[str, Any]:
+    return await _api_save_kind(payload, request, user, kind_id)
+
+
+async def _api_save_kind(payload: BookingKindIn, request: Request, user: dict, kind_id: int | None) -> dict[str, Any]:
+    existing = await repo.get_kind(kind_id) if kind_id is not None else None
+    if kind_id is not None and not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking kind not found")
+    try:
+        values = scheduling.parse_kind_form(payload.model_dump())
+    except scheduling.AppointmentError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors) from exc
+    saved_id = await _store_kind(values, kind_id, existing)
+    await audit_service.log_action(action="scheduling.kind.save", user_id=user.get("id"), entity_type="booking_kind",
+                                   entity_id=saved_id, new_value=values, request=request)
+    return _kind_json(await repo.get_kind(saved_id) or {})
+
+
+@router.delete("/api/scheduling/kinds/{kind_id}", summary="Delete (or archive, if in use) a booking kind")
+async def api_delete_kind(kind_id: int, request: Request, user: dict = Depends(require_super_admin)) -> dict[str, Any]:
+    kind = await repo.get_kind(kind_id)
+    if not kind:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking kind not found")
+    try:
+        outcome = await _remove_kind(kind)
+    except scheduling.AppointmentError as exc:
+        raise HTTPException(status_code=409, detail=exc.errors) from exc
+    await audit_service.log_action(action=f"scheduling.kind.{outcome}", user_id=user.get("id"),
+                                   entity_type="booking_kind", entity_id=kind_id, request=request)
+    return {"id": kind_id, "outcome": outcome}
 
 
 @router.get("/api/scheduling/availability", summary="When a technician is unavailable on a day")
