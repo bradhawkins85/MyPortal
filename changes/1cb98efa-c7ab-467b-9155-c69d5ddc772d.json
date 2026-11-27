@@ -1,0 +1,7 @@
+{
+  "guid": "1cb98efa-c7ab-467b-9155-c69d5ddc772d",
+  "occurred_at": "2026-11-26T23:59Z",
+  "change_type": "Fix",
+  "summary": "Rows in Software mappings and Unmapped software on the vulnerability settings page now highlight when you hover over them.",
+  "content_hash": "02292a042893053cb7cdb44e9c41ef9dc9b864f286ddacb59d32fdb551944cd5"
+}
