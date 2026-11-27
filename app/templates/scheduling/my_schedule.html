@@ -25,8 +25,8 @@
 <div class="admin-grid sch-page">
   <section class="card card--panel admin-grid__full" aria-labelledby="sch-week-heading">
     <div class="card__header"><div>
-      <h2 class="card__title" id="sch-week-heading">Week of {{ week_start.strftime("%d %B %Y") }}</h2>
-      <p class="card__subtitle">{{ week_start.strftime("%a %d %b") }} – {{ week_end.strftime("%a %d %b") }}, times in {{ settings.timezone }}.</p>
+      <h2 class="card__title" id="sch-week-heading">{{ week_heading }}</h2>
+      <p class="card__subtitle">{{ week_range }}, times in {{ settings.timezone }}.</p>
     </div></div>
     {% if days %}
       {% for group in days %}

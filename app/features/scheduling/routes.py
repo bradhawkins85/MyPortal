@@ -157,6 +157,9 @@ async def my_schedule(request: Request, technician_id: int | None = Query(defaul
             "days": scheduling.group_by_day(appointments, settings.zone),
             "week_start": start_day,
             "week_end": start_day + timedelta(days=6),
+            # Calendar dates in the scheduling time zone, so they are labelled here.
+            "week_heading": f"Week of {start_day:%d %B %Y}",
+            "week_range": f"{start_day:%a %d %b} – {start_day + timedelta(days=6):%a %d %b}",
             "previous_week": (start_day - timedelta(days=7)).isoformat(),
             "next_week": (start_day + timedelta(days=7)).isoformat(),
             "technician_id": technician,
