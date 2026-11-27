@@ -10,7 +10,7 @@
 * ``POST /admin/schedule/kinds`` (and ``/{id}``, ``/{id}/default``,
   ``/{id}/delete``; super admins) add, rename, remove and choose the default
   booking kind, from the schedule page's Actions menu
-* ``/api/appointments``, ``/api/tickets/{id}/appointments`` and
+* ``/api/appointments`` (``/{id}/move`` backs dragging on the board), ``/api/tickets/{id}/appointments`` and
   ``/api/scheduling/kinds``
 * ``GET /api/scheduling/availability`` a technician's taken time on a day
 * each ticket page's Appointments card, which books in place and returns to
@@ -33,7 +33,7 @@ from .routes import router
 
 PACK = FeaturePack(
     slug="scheduling",
-    version="1.2.1",
+    version="1.3.0",
     routers=(router,),
     background_jobs=(scheduling.sync_job,),
 )

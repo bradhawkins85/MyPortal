@@ -473,7 +473,7 @@ async def test_one_product_failing_unexpectedly_does_not_stop_the_sync(monkeypat
 def test_failed_at_migration_runs_on_sqlite():
     connection = sqlite3.connect(":memory:")
     connection.execute("CREATE TABLE vuln_sync_state (id INTEGER PRIMARY KEY)")
-    sql = db._adapt_sql_for_sqlite(Path("migrations/584_vuln_sync_failed_at.sql").read_text(encoding="utf-8"))
+    sql = db._adapt_sql_for_sqlite(Path("migrations/586_vuln_sync_failed_at.sql").read_text(encoding="utf-8"))
     for statement in db._split_sql_statements(sql):
         connection.execute(statement.replace("ADD COLUMN IF NOT EXISTS", "ADD COLUMN"))
     assert "failed_at" in {row[1] for row in connection.execute("PRAGMA table_info(vuln_sync_state)")}

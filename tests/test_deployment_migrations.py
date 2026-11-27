@@ -108,3 +108,16 @@ def test_current_migrations_have_deployment_metadata():
             assert Database()._migration_metadata(path)["phase"] in {
                 "expand", "data", "contract",
             }
+
+
+def test_new_migrations_have_unique_numbers():
+    # Older releases shipped duplicate numbers and keep them: the runner tracks
+    # each file by name. From 584 on, every migration takes its own number.
+    migrations_dir = Path(__file__).parent.parent / "migrations"
+    seen: dict[int, str] = {}
+    for path in sorted(migrations_dir.glob("*.sql")):
+        number = int(path.name.split("_", 1)[0])
+        if number < 584:
+            continue
+        assert number not in seen, f"{path.name} reuses migration number {number} ({seen[number]})"
+        seen[number] = path.name

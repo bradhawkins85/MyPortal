@@ -160,6 +160,211 @@
     });
   });
 
+  // Drag a booking to another time on the same row, or to another technician's
+  // row. The length and details stay the same; the server refuses a move over
+  // another booking or busy calendar time, and the booking goes back. Touch needs a short press before dragging so
+  // the board still scrolls.
+  const boardEl = document.querySelector('[data-sch-board]');
+  const moveStatus = document.querySelector('[data-sch-move-status]');
+  const SNAP = 15;
+  const toTime = (minutes) => String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
+  let suppressClick = false;
+
+  function say(text) { if (moveStatus) moveStatus.textContent = text; }
+
+  function csrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta && meta.getAttribute('content')) return meta.getAttribute('content');
+    const input = document.querySelector('input[name="_csrf"]');
+    return input ? input.value : '';
+  }
+
+  async function postMove(id, body) {
+    const response = await fetch('/api/appointments/' + encodeURIComponent(id) + '/move', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
+      body: JSON.stringify(body),
+    });
+    let data = null;
+    try { data = await response.json(); } catch (error) { data = null; }
+    return { status: response.status, ok: response.ok, data };
+  }
+
+  function errorText(data) {
+    const detail = data && data.detail;
+    if (!detail) return 'The appointment could not be moved.';
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) return 'The appointment could not be moved.';
+    return Object.values(detail).join(' ');
+  }
+
+  async function commitMove(block, body) {
+    block.classList.add('sch-block--saving');
+    say('Moving appointment…');
+    try {
+      const result = await postMove(block.getAttribute('data-sch-move'), body);
+      if (!result.ok) {
+        say(errorText(result.data));
+        window.alert(errorText(result.data));
+        window.location.reload();
+        return;
+      }
+      say('Moved to ' + (result.data && result.data.when ? result.data.when : body.start_time) + '.');
+      window.location.reload();
+    } catch (error) {
+      window.alert('The appointment could not be moved. Check your connection and try again.');
+      window.location.reload();
+    }
+  }
+
+  if (boardEl) {
+    const startHour = Number(boardEl.getAttribute('data-start-hour'));
+    const endHour = Number(boardEl.getAttribute('data-end-hour'));
+    const dayStart = startHour * 60;
+    const dayEnd = endHour * 60;
+    const span = dayEnd - dayStart;
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    document.addEventListener('click', (event) => {
+      if (!suppressClick) return;
+      suppressClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+
+    boardEl.querySelectorAll('[data-sch-move]').forEach((block) => {
+      const duration = Number(block.getAttribute('data-duration')) || SNAP;
+      const originalStart = toMinutes(block.getAttribute('data-start'));
+      const timeLabel = block.querySelector('.sch-block__time');
+      const originalLabel = timeLabel ? timeLabel.textContent : '';
+      let drag = null;
+
+      function rowAt(x, y) {
+        const hit = document.elementFromPoint(x, y);
+        return hit ? hit.closest('[data-sch-row]') : null;
+      }
+
+      function place(x, y) {
+        const row = rowAt(x, y) || drag.row;
+        const track = row.querySelector('[data-sch-track]');
+        const rect = track.getBoundingClientRect();
+        const pointer = dayStart + ((x - rect.left) / rect.width) * span;
+        let start = Math.round((pointer - drag.grabOffset) / SNAP) * SNAP;
+        start = Math.min(Math.max(start, dayStart), Math.max(dayStart, dayEnd - duration));
+        if (row !== drag.row) {
+          drag.row.classList.remove('sch-row--drop-target');
+          drag.row = row;
+          track.appendChild(block);
+        }
+        row.classList.add('sch-row--drop-target');
+        drag.start = start;
+        block.style.left = (100 * (start - dayStart) / span) + '%';
+        block.style.setProperty('--sch-lane', '0');
+        if (timeLabel) timeLabel.textContent = toTime(start) + '–' + toTime(Math.min(start + duration, 24 * 60 - 1));
+      }
+
+      function begin() {
+        drag.active = true;
+        block.classList.add('sch-block--dragging');
+        boardEl.classList.add('sch-board--dragging');
+        if (reduceMotion) block.style.transition = 'none';
+        say('Moving ' + (block.querySelector('.sch-block__title') || block).textContent.trim() + '. Release to drop, Escape to cancel.');
+      }
+
+      function restore(state) {
+        state.row.classList.remove('sch-row--drop-target');
+        if (state.originalParent && block.parentElement !== state.originalParent) {
+          state.originalParent.insertBefore(block, state.originalNext);
+        }
+        block.style.left = state.originalLeft;
+        block.style.setProperty('--sch-lane', state.originalLane);
+        if (timeLabel) timeLabel.textContent = originalLabel;
+      }
+
+      function finish(event, cancelled) {
+        if (!drag) return;
+        const state = drag;
+        drag = null;
+        clearTimeout(state.timer);
+        window.removeEventListener('keydown', state.onKey, true);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onCancel);
+        if (!state.active) return;
+        suppressClick = true;
+        setTimeout(() => { suppressClick = false; }, 400);
+        block.classList.remove('sch-block--dragging');
+        boardEl.classList.remove('sch-board--dragging');
+        const technician = state.row.getAttribute('data-technician');
+        const unchanged = technician === state.originalTechnician && state.start === originalStart;
+        if (cancelled || unchanged || state.start === null) {
+          restore(state);
+          say(cancelled ? 'Move cancelled.' : '');
+          return;
+        }
+        state.row.classList.remove('sch-row--drop-target');
+        commitMove(block, { technician_user_id: Number(technician), date: boardEl.getAttribute('data-date'),
+          start_time: toTime(state.start) });
+      }
+
+      block.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0 || block.classList.contains('sch-block--saving')) return;
+        const track = block.closest('[data-sch-track]');
+        const rect = track.getBoundingClientRect();
+        const pointer = dayStart + ((event.clientX - rect.left) / rect.width) * span;
+        const row = block.closest('[data-sch-row]');
+        drag = {
+          pointerId: event.pointerId, x: event.clientX, y: event.clientY, active: false, start: null,
+          touch: event.pointerType === 'touch', grabOffset: pointer - originalStart, row,
+          originalTechnician: row.getAttribute('data-technician'), originalParent: block.parentElement,
+          originalNext: block.nextSibling, originalLeft: block.style.left,
+          originalLane: block.style.getPropertyValue('--sch-lane'),
+        };
+        drag.onKey = (keyEvent) => {
+          if (keyEvent.key === 'Escape' && drag && drag.active) {
+            keyEvent.preventDefault();
+            finish(keyEvent, true);
+          }
+        };
+        window.addEventListener('keydown', drag.onKey, true);
+        // Listen on the window: moving the block to another row's track drops pointer capture.
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onCancel);
+        if (drag.touch) {
+          drag.timer = setTimeout(() => {
+            if (!drag) return;
+            begin();
+            place(drag.x, drag.y);
+          }, 350);
+        }
+      });
+
+      function onUp(event) { if (drag && event.pointerId === drag.pointerId) finish(event, false); }
+      function onCancel(event) { if (drag && event.pointerId === drag.pointerId) finish(event, true); }
+      function onMove(event) {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        if (!drag.active) {
+          const moved = Math.hypot(event.clientX - drag.x, event.clientY - drag.y);
+          if (drag.touch) {
+            if (moved > 8) finish(event, true); // a scroll, not a drag
+            return;
+          }
+          if (moved < 5) return;
+          begin();
+        }
+        event.preventDefault();
+        place(event.clientX, event.clientY);
+      }
+
+      // While a touch drag is under way, stop the page scrolling under the finger.
+      block.addEventListener('touchmove', (event) => { if (drag && drag.active) event.preventDefault(); }, { passive: false });
+      block.addEventListener('dragstart', (event) => event.preventDefault());
+      block.addEventListener('contextmenu', (event) => { if (drag && drag.touch) event.preventDefault(); });
+    });
+  }
+
   // Click an empty spot on a technician's row to book them then.
   document.querySelectorAll('[data-sch-track]').forEach((track) => {
     track.addEventListener('click', (event) => {

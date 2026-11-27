@@ -167,6 +167,53 @@
   opacity: 0.6;
 }
 
+.sch-block[data-sch-move] {
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.sch-block--dragging {
+  cursor: grabbing;
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0.85;
+  box-shadow: var(--hf-shadow-md);
+  outline: 2px solid var(--hf-focus);
+}
+
+.sch-block--saving {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.sch-row--drop-target .sch-row__track {
+  box-shadow: inset 0 0 0 2px var(--hf-focus);
+}
+
+.sch-board--dragging,
+.sch-board--dragging .sch-row__track {
+  cursor: grabbing;
+}
+
+.sch-board__status {
+  margin: 0.4rem 0 0;
+  min-height: 1.2em;
+  font-size: 0.85rem;
+  color: var(--hf-muted);
+}
+
+.sch-board__status:empty {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sch-block--dragging {
+    transition: left 60ms linear;
+  }
+}
+
 .sch-block--sync-failed {
   box-shadow: inset 0 0 0 1px var(--hf-danger);
 }

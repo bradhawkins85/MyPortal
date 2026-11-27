@@ -150,7 +150,7 @@ should set `category` in their `INSERT`.
 
 ## Vulnerabilities
 
-Migration `584_vulnerability_reporting_queries.sql` adds these under the
+Migration `587_vulnerability_reporting_queries.sql` adds these under the
 *Vulnerabilities* category. Every report also has a company scoped copy: add
 `-company-scoped` to the slug and ` (Company Scoped)` to the name. Detection
 reports count only open findings on active RMM agents, so accepted risks are
