@@ -489,6 +489,16 @@
               </a>
             </li>
           {% endif %}
+          {% if feature_pack_available('scheduling') and ((is_super_admin | default(false)) or (has_admin_technician_access | default(false))) %}
+            <li class="menu__item">
+              <a href="/admin/schedule" {% if current_path.startswith('/admin/schedule') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M7 2h2v2h6V2h2v2h3v18H4V4h3zm-1 8v10h12V10zm0-2h12V6H6zm2 4h3v3H8z"/></svg>
+                </span>
+                <span class="menu__label">Schedule</span>
+              </a>
+            </li>
+          {% endif %}
           {% if can_access_marketing %}
             <li class="menu__item">
               <a href="/admin/marketing" {% if current_path.startswith('/admin/marketing') %}aria-current="page"{% endif %}>

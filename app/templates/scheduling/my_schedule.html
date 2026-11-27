@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/scheduling.css') }}">{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">My schedule</span>
+    <form class="page-header-toolbar" method="get" action="/admin/schedule/me">
+      <label class="visually-hidden" for="sch-me-tech">Technician</label>
+      <select id="sch-me-tech" class="form-input page-header-toolbar__select" name="technician_id" data-submit-on-change>
+        {% for tech in technicians %}<option value="{{ tech.id }}" {% if tech.id == technician_id %}selected{% endif %}>{{ tech.name }}</option>{% endfor %}
+      </select>
+      <input type="hidden" name="week" value="{{ week_start.isoformat() }}">
+      <noscript><button type="submit" class="button button--ghost">Show</button></noscript>
+    </form>
+  </div>
+{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "‹ Previous week", "type": "link", "href": "/admin/schedule/me?technician_id=" ~ technician_id ~ "&week=" ~ previous_week},
+    {"label": "Next week ›", "type": "link", "href": "/admin/schedule/me?technician_id=" ~ technician_id ~ "&week=" ~ next_week},
+    {"label": "Dispatch board", "type": "link", "href": "/admin/schedule"}
+  ]) }}
+{% endblock %}
+{% block content %}
+<div class="admin-grid sch-page">
+  <section class="card card--panel admin-grid__full" aria-labelledby="sch-week-heading">
+    <div class="card__header"><div>
+      <h2 class="card__title" id="sch-week-heading">Week of {{ week_start.strftime("%d %B %Y") }}</h2>
+      <p class="card__subtitle">{{ week_start.strftime("%a %d %b") }} – {{ week_end.strftime("%a %d %b") }}, times in {{ settings.timezone }}.</p>
+    </div></div>
+    {% if days %}
+      {% for group in days %}
+      <h3 class="sch-day">{{ group.day.strftime("%A %d %B") }}</h3>
+      <ul class="sch-agenda">
+        {% for item in group["items"] %}
+        <li class="sch-agenda__item sch-block--{{ item.kind }} sch-agenda__item--{{ item.status }}">
+          <a href="/admin/schedule?appointment={{ item.id }}"><strong>{{ item.when.split(", ")[-1] }}</strong> {{ item.kind_label }}</a>
+          <span>#{{ item.ticket_number or item.ticket_id }} {{ item.ticket_subject or "" }} <span class="text-muted">· {{ item.company_name or "No company" }}</span></span>
+          {% if item.location %}<span class="text-muted">{{ item.location }}</span>{% endif %}
+          <span class="sch-agenda__meta">{% if item.status != "scheduled" %}<span class="status status--neutral">{{ statuses[item.status] }}</span>{% endif %}{% if item.sync_status == "failed" %}<span class="status status--error">{{ sync_labels.failed }}</span>{% endif %}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endfor %}
+    {% else %}
+      <p class="empty-state">Nothing booked this week. <a href="/admin/schedule?new=1&amp;technician_id={{ technician_id }}">Book an appointment</a></p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/scheduling.js') }}" defer></script>{% endblock %}

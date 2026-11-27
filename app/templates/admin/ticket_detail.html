@@ -978,6 +978,8 @@
           </section>
           {% endif %}
 
+          {% if ticket_appointments is defined and ticket_appointments %}{% include "scheduling/_ticket_appointments.html" %}{% endif %}
+
           <details class="card card--panel card-collapsible" data-ticket-tasks-card>
             <summary class="card__header card__header--collapsible">
               <h2 class="card__title">Tasks <span data-tasks-count-badge hidden></span></h2>

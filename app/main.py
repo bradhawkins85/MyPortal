@@ -12844,6 +12844,13 @@ async def _render_ticket_detail(
     extra["ticket_custom_fields"] = await ticket_custom_fields_service.build_ticket_fields(
         int(ticket_id), is_super_admin=bool(user.get("is_super_admin")), is_staff=True
     )
+    if _feature_pack_available("scheduling"):
+        from app.features.scheduling import routes as scheduling_routes
+
+        try:
+            extra["ticket_appointments"] = await scheduling_routes.ticket_appointments_context(int(ticket_id))
+        except Exception as exc:  # noqa: BLE001 - the ticket page must render without its Appointments card
+            log_warning("Could not load ticket appointments", ticket_id=ticket_id, error=str(exc))
     response = await _render_template("admin/ticket_detail.html", request, user, extra=extra)
     response.status_code = status_code
     return response
