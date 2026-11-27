@@ -499,6 +499,16 @@
               </a>
             </li>
           {% endif %}
+          {% if feature_pack_available('agreements') and ((is_super_admin | default(false)) or (has_admin_technician_access | default(false))) %}
+            <li class="menu__item">
+              <a href="/admin/agreements" {% if current_path.startswith('/admin/agreements') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h9l5 5v15H6zm8 1.5V8h4.5zM8 11h10v2H8zm0 4h10v2H8zm0-8h4v2H8z"/></svg>
+                </span>
+                <span class="menu__label">Agreements</span>
+              </a>
+            </li>
+          {% endif %}
           {% if can_access_marketing %}
             <li class="menu__item">
               <a href="/admin/marketing" {% if current_path.startswith('/admin/marketing') %}aria-current="page"{% endif %}>

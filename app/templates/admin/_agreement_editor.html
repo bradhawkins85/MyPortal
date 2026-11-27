@@ -1,0 +1,142 @@
+{#- Add or edit a service agreement (admin/agreements.html). static/js/agreements.js shows the
+    fields each type uses and writes the summary; without JavaScript every field shows. -#}
+{% set err = errors or {} %}
+{% set kind = e.agreement_type or "hours" %}
+<div class="modal scf-modal" id="agr-modal" role="dialog" aria-modal="true" aria-labelledby="agr-modal-title" {% if not editing %}hidden{% endif %} data-agr-modal {% if editing %}data-agr-open-on-load{% endif %}>
+  <form class="modal__panel modal__panel--wide scf-editor" method="post" action="/admin/agreements{% if e.id %}/{{ e.id }}{% endif %}" data-agr-form novalidate>
+    {% include "partials/csrf.html" %}
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="scf-preview__eyebrow">Service agreement</p>
+        <h2 class="modal__title" id="agr-modal-title">{{ "Edit " ~ e.name if e.id else "Add agreement" }}</h2>
+        <p class="scf-editor__subtitle">Record what the contract covers. Usage is worked out from the company's ticket time.</p>
+      </div>
+      <a href="/admin/agreements" class="modal__close" data-modal-close aria-label="Close agreement editor"></a>
+    </header>
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main">
+        {% if err %}<div class="alert alert--error" role="alert">Check the highlighted fields.</div>{% endif %}
+        <div class="scf-grid">
+          <div class="form-field">
+            <label class="form-label" for="agr-company-field">Company</label>
+            <select class="form-input" id="agr-company-field" name="company_id" required data-agr-input>
+              <option value="">Choose a company…</option>
+              {% for company in companies %}<option value="{{ company.id }}" {% if e.company_id == company.id %}selected{% endif %}>{{ company.name }}</option>{% endfor %}
+            </select>
+            {% if err.company_id %}<p class="form-help form-help--error">{{ err.company_id }}</p>{% endif %}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="agr-name">Name</label>
+            <input class="form-input" id="agr-name" name="name" maxlength="255" value="{{ e.name or '' }}" placeholder="e.g. Managed services 2027" required data-agr-input>
+            {% if err.name %}<p class="form-help form-help--error">{{ err.name }}</p>{% endif %}
+          </div>
+        </div>
+
+        <fieldset class="agr-fieldset">
+          <legend class="form-label">What it covers</legend>
+          <div class="scf-type-grid agr-type-grid">
+            {% for key, info in agreement_types.items() %}
+            <label class="scf-type-card">
+              <input type="radio" name="agreement_type" value="{{ key }}" {% if kind == key %}checked{% endif %} data-agr-type>
+              <span class="scf-type-card__label">{{ info[0] }}</span>
+              <span class="scf-type-card__help">{{ info[1] }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          {% if err.agreement_type %}<p class="form-help form-help--error">{{ err.agreement_type }}</p>{% endif %}
+        </fieldset>
+
+        <div class="scf-grid" data-agr-show="hours,block" {% if kind == "unlimited" %}hidden{% endif %}>
+          <div class="form-field">
+            <label class="form-label" for="agr-hours">Hours included</label>
+            <input class="form-input" id="agr-hours" name="hours_allowance" type="number" min="0.25" step="0.25" inputmode="decimal" value="{{ e.hours_allowance or '' }}" placeholder="10" data-agr-input>
+            {% if err.hours_allowance %}<p class="form-help form-help--error">{{ err.hours_allowance }}</p>{% endif %}
+          </div>
+          <div class="form-field" data-agr-show="hours" {% if kind != "hours" %}hidden{% endif %}>
+            <span class="form-label" id="agr-period-label">Every</span>
+            <div class="mt-segmented" role="radiogroup" aria-labelledby="agr-period-label">
+              {% for key, label in periods.items() %}<label class="mt-segmented__option"><input type="radio" name="period" value="{{ key }}" {% if (e.period or "monthly") == key %}checked{% endif %} data-agr-input><span>{{ {"monthly": "Month", "quarterly": "Quarter", "annual": "Year"}[key] }}</span></label>{% endfor %}
+            </div>
+            <p class="form-help">Months and quarters follow the calendar; years run from the start date.</p>
+            {% if err.period %}<p class="form-help form-help--error">{{ err.period }}</p>{% endif %}
+          </div>
+        </div>
+
+        <div class="scf-grid">
+          <div class="form-field">
+            <label class="form-label" for="agr-start">Starts</label>
+            <input class="form-input" id="agr-start" name="start_date" type="date" value="{{ e.start_date or '' }}" required data-agr-input>
+            {% if err.start_date %}<p class="form-help form-help--error">{{ err.start_date }}</p>{% endif %}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="agr-end">Ends <span class="field-optional">optional</span></label>
+            <input class="form-input" id="agr-end" name="end_date" type="date" value="{{ e.end_date or '' }}" data-agr-input>
+            <p class="form-help">Leave blank for an agreement that runs until cancelled.</p>
+            {% if err.end_date %}<p class="form-help form-help--error">{{ err.end_date }}</p>{% endif %}
+          </div>
+        </div>
+
+        <fieldset class="agr-fieldset">
+          <legend class="form-label">Labour types covered</legend>
+          <div class="agr-labour">
+            {% for labour in labour_types %}
+            <label class="agr-labour__item"><input type="checkbox" name="labour_type_ids" value="{{ labour.id }}" {% if labour.id in (e.labour_type_ids or []) %}checked{% endif %} data-agr-input> <span>{{ labour.name }}</span></label>
+            {% else %}
+            <p class="form-help">No labour types are set up, so all ticket time is covered.</p>
+            {% endfor %}
+          </div>
+          <p class="form-help">Tick none to cover every labour type, or tick the ones the contract includes (for example Remote support only).</p>
+          {% if err.labour_type_ids %}<p class="form-help form-help--error">{{ err.labour_type_ids }}</p>{% endif %}
+        </fieldset>
+
+        <div class="scf-grid">
+          <div class="form-field">
+            <label class="form-label" for="agr-fee">Fee per period <span class="field-optional">optional</span></label>
+            <input class="form-input" id="agr-fee" name="fee_amount" type="number" min="0" step="0.01" inputmode="decimal" value="{{ e.fee_amount or '' }}" data-agr-input>
+            <p class="form-help">Used to show the effective hourly rate. Billing itself is unchanged.</p>
+            {% if err.fee_amount %}<p class="form-help form-help--error">{{ err.fee_amount }}</p>{% endif %}
+          </div>
+          <div class="form-field" data-agr-show="hours,block" {% if kind == "unlimited" %}hidden{% endif %}>
+            <label class="form-label" for="agr-alert">Alert when this % is used</label>
+            <input class="form-input" id="agr-alert" name="alert_percent" type="number" min="1" max="100" value="{{ e.alert_percent or 80 }}" data-agr-input>
+            <p class="form-help">Fires the <em>Service agreement usage reached its alert level</em> automation trigger.</p>
+            {% if err.alert_percent %}<p class="form-help form-help--error">{{ err.alert_percent }}</p>{% endif %}
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label" for="agr-notes">Notes <span class="field-optional">optional</span></label>
+          <textarea class="form-input" id="agr-notes" name="notes" rows="2" maxlength="4000">{{ e.notes or '' }}</textarea>
+        </div>
+        {% if e.id %}
+        <label class="scf-switch">
+          <input type="checkbox" name="is_cancelled" value="1" {% if e.is_cancelled %}checked{% endif %}>
+          <span class="scf-switch__track" aria-hidden="true"></span>
+          <span>Cancelled: stop counting time against it</span>
+        </label>
+        {% endif %}
+      </div>
+      <aside class="scf-preview" aria-label="Summary">
+        <p class="scf-preview__eyebrow">In plain English</p>
+        <p class="agr-preview" data-agr-preview role="status" aria-live="polite">Choose what the agreement covers.</p>
+        <ul class="scf-preview__rules">
+          <li>Ticket time for this company counts against it.</li>
+          <li>Unlimited agreements cover time first, then hours, then prepaid blocks.</li>
+          <li>Time beyond the hours shows as overage.</li>
+        </ul>
+      </aside>
+    </div>
+    <footer class="modal__footer scf-editor__footer">
+      {% if e.id %}<button type="submit" form="agr-delete-form" class="button button--danger">Delete</button>{% endif %}
+      <span class="scf-editor__spacer"></span>
+      <a href="/admin/agreements" class="button button--ghost" data-modal-close>Cancel</a>
+      <button type="submit" class="button button--primary">Save agreement</button>
+    </footer>
+  </form>
+  {% if e.id %}
+  <form id="agr-delete-form" method="post" action="/admin/agreements/{{ e.id }}/delete" data-confirm="Delete {{ e.name }}? Its usage history is worked out from ticket time, so nothing else is lost.">
+    {% include "partials/csrf.html" %}
+  </form>
+  {% endif %}
+</div>
+<noscript><style>#agr-modal:not([hidden]) { position: static; } [data-agr-show][hidden] { display: block !important; }</style></noscript>
