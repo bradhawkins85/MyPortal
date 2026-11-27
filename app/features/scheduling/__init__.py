@@ -7,7 +7,8 @@
   ``/{id}/sync``) book, move, complete, cancel and re-sync appointments
 * ``POST /admin/schedule/settings`` (super admins) calendar sync, time zone,
   working hours and default length
-* ``/api/appointments`` and ``/api/tickets/{id}/appointments``
+* ``/api/appointments`` (``/{id}/move`` backs dragging on the board) and
+  ``/api/tickets/{id}/appointments``
 * each ticket page's Appointments card
 
 A background job retries Microsoft 365 calendar writes that failed (on one
@@ -26,7 +27,7 @@ from .routes import router
 
 PACK = FeaturePack(
     slug="scheduling",
-    version="1.0.0",
+    version="1.1.0",
     routers=(router,),
     background_jobs=(scheduling.sync_job,),
 )

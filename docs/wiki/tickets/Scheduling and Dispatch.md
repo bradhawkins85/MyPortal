@@ -12,6 +12,11 @@ technician's calendar. Each row shows how much of the day is booked.
 
 - Click an appointment to change it, mark it as done or cancel it.
 - Click an empty spot on a technician's row to book them at that time (to the nearest 15 minutes).
+- Drag an appointment to move it: along the row to change the time, or onto another technician's row
+  to hand it to them. It snaps to 15 minutes and keeps its length and details. If the technician is
+  already booked then, you are asked before double-booking. On a touch screen, press and hold the
+  appointment briefly, then drag. Press Escape to cancel a drag. Completed appointments, and ones that
+  run past the board's hours, are changed in the editor instead.
 - **Waiting to be scheduled** lists open tickets with no upcoming appointment; **Book** opens the
   editor for that ticket and its assigned technician.
 - **My schedule** (`/admin/schedule/me`) lists a technician's week, day by day.
@@ -58,6 +63,7 @@ Settings also set the board's hours, the time zone and the default appointment l
 | `POST` | `/api/appointments` (409 when the technician is already booked, unless `book_anyway`) |
 | `PUT` | `/api/appointments/{id}` |
 | `POST` | `/api/appointments/{id}/cancel` |
+| `POST` | `/api/appointments/{id}/move` (`technician_user_id`, `date`, `start_time`, optional `book_anyway`; keeps the length; 409 on a clash) |
 | `GET` | `/api/scheduling/settings` (super admins) |
 
 Disable the feature with `DISABLED_FEATURE_PACKS=scheduling`.

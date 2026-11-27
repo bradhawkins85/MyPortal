@@ -40,7 +40,7 @@ def test_pack_registers_routes_and_job():
             "/admin/schedule/appointments/{appointment_id:int}", "/admin/schedule/appointments/{appointment_id:int}/status",
             "/admin/schedule/appointments/{appointment_id:int}/sync", "/admin/schedule/settings", "/api/appointments",
             "/api/appointments/{appointment_id}", "/api/tickets/{ticket_id}/appointments",
-            "/api/appointments/{appointment_id}/cancel"} <= paths
+            "/api/appointments/{appointment_id}/cancel", "/api/appointments/{appointment_id}/move"} <= paths
     assert PACK.background_jobs == (scheduling.sync_job,)
 
 
@@ -323,3 +323,61 @@ async def test_repository_queries_bind_every_value(monkeypatch):
     await repo.list_unscheduled_tickets(datetime(2026, 1, 1))
     for sql, params in calls:
         assert sql.count("%s") == len(params), sql
+
+
+def test_move_values_keeps_details_and_changes_time_and_technician():
+    values = scheduling.move_values(_appointment(), BRISBANE, technician_ids=[3, 9], technician_user_id=9,
+                                    day=date(2026, 12, 2), start_time="13:15")
+    assert values["technician_user_id"] == 9
+    assert values["starts_at"] == datetime(2026, 12, 2, 3, 15)  # 13:15 Brisbane (UTC+10)
+    assert values["ends_at"] - values["starts_at"] == datetime(2026, 12, 1, 1, 30) - datetime(2026, 12, 1, 0, 0)
+    assert (values["ticket_id"], values["kind"], values["location"], values["notes"], values["status"]) == (
+        42, "onsite", "12 High St", "Bring toner", "scheduled")
+
+
+def test_move_values_rejects_unknown_technician_and_finished_appointments():
+    with pytest.raises(scheduling.AppointmentError) as exc:
+        scheduling.move_values(_appointment(), BRISBANE, technician_ids=[3], technician_user_id=99,
+                               day=date(2026, 12, 2), start_time="09:00")
+    assert "technician_user_id" in exc.value.errors
+    with pytest.raises(scheduling.AppointmentError) as exc:
+        scheduling.move_values(_appointment(status="completed"), BRISBANE, technician_ids=[3], technician_user_id=3,
+                               day=date(2026, 12, 2), start_time="09:00")
+    assert "status" in exc.value.errors
+
+
+@pytest.mark.asyncio
+async def test_move_endpoint_saves_and_reports_conflicts(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.features.scheduling import routes
+    from app.services import audit as audit_service
+
+    monkeypatch.setattr(repo, "get", AsyncMock(return_value=_appointment()))
+    monkeypatch.setattr(scheduling, "load_settings", AsyncMock(return_value=BRISBANE))
+    monkeypatch.setattr(routes, "_technicians", AsyncMock(return_value=[{"id": 3}, {"id": 9}]))
+    monkeypatch.setattr(audit_service, "log_action", AsyncMock())
+    clash = [_appointment(id=8, technician_user_id=9)]
+    monkeypatch.setattr(scheduling, "conflicts", AsyncMock(return_value=clash))
+    save = AsyncMock(return_value=_appointment(technician_user_id=9))
+    monkeypatch.setattr(scheduling, "save", save)
+    payload = routes.AppointmentMoveIn(technician_user_id=9, date=date(2026, 12, 2), start_time="13:15")
+
+    with pytest.raises(HTTPException) as exc:
+        await routes.api_move(7, payload, SimpleNamespace(), user={"id": 1})
+    assert exc.value.status_code == 409 and "conflict" in exc.value.detail
+    save.assert_not_awaited()
+
+    payload.book_anyway = True
+    result = await routes.api_move(7, payload, SimpleNamespace(), user={"id": 1})
+    assert result["technician_user_id"] == 9
+    values = save.await_args.args[0]
+    assert values["starts_at"] == datetime(2026, 12, 2, 3, 15)
+    assert save.await_args.kwargs["appointment_id"] == 7
+
+
+def test_board_blocks_carry_move_data():
+    item = scheduling.board(date(2026, 12, 1), [{"id": 3}], [_appointment()], BRISBANE)["rows"][0]["items"][0]
+    assert (item["start_label"], item["duration_minutes"]) == ("10:00", 90)
+    source = Path("app/templates/scheduling/board.html").read_text(encoding="utf-8")
+    assert 'data-sch-move="{{ item.id }}"' in source

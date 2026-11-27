@@ -223,6 +223,22 @@ def parse_form(form: Mapping[str, Any], settings: Settings, *, technician_ids: I
     }
 
 
+def move_values(appointment: Mapping[str, Any], settings: Settings, *, technician_ids: Iterable[int],
+                technician_user_id: int, day: date, start_time: str) -> dict[str, Any]:
+    """Validated values for dragging ``appointment`` to another technician and/or start time.
+
+    Everything else (ticket, kind, length, location, notes) stays as it was. Only
+    scheduled appointments can be moved.
+    """
+
+    if appointment.get("status") != "scheduled":
+        raise AppointmentError({"status": "Only scheduled appointments can be moved."})
+    state = editor_state(appointment, settings)
+    state.update(technician_user_id=technician_user_id, date=day.isoformat(), start_time=start_time)
+    return parse_form({key: "" if value is None else str(value) for key, value in state.items()}, settings,
+                      technician_ids=technician_ids)
+
+
 async def conflicts(values: Mapping[str, Any], *, exclude_id: int | None = None) -> list[dict[str, Any]]:
     if values.get("status") != "scheduled":
         return []
@@ -499,6 +515,7 @@ def _block(appointment: Mapping[str, Any], day_start: datetime, day_end: datetim
         "width": round(max(1.5, 100 * (right - left)), 2),
         "start_label": f"{start:%H:%M}",
         "end_label": f"{end:%H:%M}",
+        "duration_minutes": int((end - start).total_seconds() // 60),
         "kind_label": KINDS.get(str(appointment.get("kind")), "Appointment"),
         "starts_before": start < day_start,
         "ends_after": end > day_end,

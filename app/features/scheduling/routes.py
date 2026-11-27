@@ -385,6 +385,40 @@ async def api_update(appointment_id: int, payload: AppointmentIn, request: Reque
     return await _api_save(payload, request, user, appointment_id)
 
 
+class AppointmentMoveIn(BaseModel):
+    technician_user_id: int = Field(description="Technician to move the appointment to")
+    date: DateType = Field(description="New local date in the scheduling time zone")
+    start_time: str = Field(description="New local start time, HH:MM", pattern=r"^\d{2}:\d{2}$")
+    book_anyway: bool = Field(default=False, description="Move even if the technician is already booked then")
+
+
+@router.post("/api/appointments/{appointment_id}/move", summary="Move an appointment to another time or technician")
+async def api_move(appointment_id: int, payload: AppointmentMoveIn, request: Request,
+                   user: dict = Depends(require_helpdesk_technician)) -> dict[str, Any]:
+    """Used by dragging a booking on the dispatch board. The length and details stay the same."""
+
+    record = await repo.get(appointment_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found")
+    settings = await scheduling.load_settings()
+    technicians = await _technicians()
+    try:
+        values = scheduling.move_values(record, settings, technician_ids=[int(tech["id"]) for tech in technicians],
+                                        technician_user_id=payload.technician_user_id, day=payload.date,
+                                        start_time=payload.start_time)
+        overlapping = await scheduling.conflicts(values, exclude_id=appointment_id)
+        if overlapping and not payload.book_anyway:
+            raise scheduling.AppointmentError({"conflict": scheduling.conflict_message(overlapping, settings.zone)})
+        saved = await scheduling.save(values, appointment_id=appointment_id, user=user, settings=settings)
+    except scheduling.AppointmentError as exc:
+        raise HTTPException(status_code=409 if "conflict" in exc.errors else 422, detail=exc.errors) from exc
+    await audit_service.log_action(action="appointment.move", user_id=user.get("id"), entity_type="appointment",
+                                   entity_id=appointment_id, previous_value=_audit(
+                                       {key: record.get(key) for key in ("technician_user_id", "starts_at", "ends_at")}),
+                                   new_value=_audit(values), request=request)
+    return _api_appointment(saved, settings)
+
+
 @router.post("/api/appointments/{appointment_id}/cancel", summary="Cancel an appointment")
 async def api_cancel(appointment_id: int, request: Request,
                      user: dict = Depends(require_helpdesk_technician)) -> dict[str, Any]:
