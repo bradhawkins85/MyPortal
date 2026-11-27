@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% set p = detail.project %}
+{% set f = detail.financials %}
+{% set STATUS_VARIANT = {"planning": "info", "active": "success", "on_hold": "warning", "completed": "neutral", "cancelled": "neutral"} %}
+{% set MILESTONE_VARIANT = {"pending": "neutral", "ready": "warning", "invoicing": "info", "invoiced": "success"} %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/projects.css') }}">{% endblock %}
+{% block header_title %}<span class="header__title-text">{{ p.name }}</span>{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Edit project", "type": "link", "variant": "primary", "href": "/admin/projects?project=" ~ p.id},
+    {"label": "All projects", "type": "link", "href": "/admin/projects?company_id=" ~ p.company_id}
+  ]) }}
+{% endblock %}
+
+{% macro money(value) -%}{{ "%.2f" | format(value) if value is not none else "—" }}{%- endmacro %}
+
+{% block content %}
+<div class="admin-grid prj-page">
+  {{ counter_strip([
+    {"label": "Tasks done", "value": p.done ~ " of " ~ p.tasks, "variant": ("success" if p.tasks and p.done == p.tasks else "info")},
+    {"label": "Hours used", "value": p.used_text ~ " of " ~ p.budget_text, "variant": ("danger" if 'over_budget' in p.flags else ("warning" if 'near_budget' in p.flags else "neutral"))},
+    {"label": "Value of time logged", "value": money(f.time_value), "variant": "neutral", "title": "Hours × labour type rates"},
+    ({"label": "Margin on fee", "value": money(f.margin) ~ ((" (" ~ f.margin_percent ~ "%)") if f.margin_percent is not none else ""), "variant": ("danger" if f.margin < 0 else "success")} if f.margin is defined else {"label": "Budget left", "value": money(f.budget_left) if f.budget_left is defined else "—", "variant": ("danger" if (f.budget_left is defined and f.budget_left < 0) else "neutral")}),
+  ]) }}
+
+  <section class="card card--panel admin-grid__full" aria-labelledby="prj-about-heading">
+    <div class="card__header"><div>
+      <h2 class="card__title" id="prj-about-heading">{{ p.company_name }}</h2>
+      <p class="card__subtitle">
+        <span class="status status--{{ STATUS_VARIANT.get(p.status, 'neutral') }}">{{ p.status_label }}</span>
+        {{ p.billing_label }}{% if p.budget_amount %} · {{ "fee" if p.billing_type == "fixed_fee" else "budget" }} {{ money(p.budget_amount) }}{% endif %}
+        {% if p.manager %} · managed by {{ p.manager }}{% endif %}
+        {% if p.start_date %} · from {{ p.start_date.isoformat() }}{% endif %}{% if p.due_date %} · due {{ p.due_date.isoformat() }}{% endif %}
+        {% if 'overdue' in p.flags %}<span class="status status--error">Overdue</span>{% endif %}
+      </p>
+    </div></div>
+    <div class="prj-progress prj-progress--wide">
+      <span class="prj-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ p.progress }}" aria-label="Tasks done"><span class="prj-meter__fill" style="width: {{ p.progress }}%"></span></span>
+      <span>{{ p.progress }}% of tasks done</span>
+    </div>
+    {% if p.description %}<p class="prj-description">{{ p.description }}</p>{% endif %}
+    {% if p.billing_type == "fixed_fee" %}<p class="form-help">Fixed fee: time logged on this project's tickets stays off ticket invoices. Bill the fee with the milestones below.</p>{% endif %}
+  </section>
+
+  <section class="card card--panel admin-grid__full" id="project-tasks" aria-labelledby="prj-tasks-heading">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="prj-tasks-heading">Phases and tasks</h2>
+        <p class="card__subtitle">Each task is a ticket for {{ p.company_name }}; log time, assign and schedule it as usual.</p>
+      </div>
+    </div>
+
+    <div class="prj-toolbar">
+      <details class="prj-disclosure" {% if not detail.groups or (detail.groups | length == 1 and not detail.groups[0].tasks) %}open{% endif %}>
+        <summary class="button button--primary button--small">+ Add task</summary>
+        <form method="post" action="/admin/projects/{{ p.id }}/tasks" class="prj-form" data-prj-task-form>
+          {% include "partials/csrf.html" %}
+          <div class="mt-segmented" role="radiogroup" aria-label="New or existing ticket">
+            <label class="mt-segmented__option"><input type="radio" name="mode" value="new" checked data-prj-task-mode><span>New ticket</span></label>
+            <label class="mt-segmented__option"><input type="radio" name="mode" value="existing" data-prj-task-mode><span>Existing ticket</span></label>
+          </div>
+          <div class="prj-form__row" data-prj-task-show="new">
+            <div class="form-field prj-grow"><label class="form-label" for="prj-task-subject">Task</label><input class="form-input" id="prj-task-subject" name="subject" maxlength="255" placeholder="e.g. Install new switches"></div>
+            <div class="form-field"><label class="form-label" for="prj-task-assignee">Assign to <span class="field-optional">optional</span></label>
+              <select class="form-input" id="prj-task-assignee" name="assigned_user_id"><option value="">No one yet</option>{% for tech in technicians %}<option value="{{ tech.id }}">{{ tech.name }}</option>{% endfor %}</select></div>
+          </div>
+          <div class="prj-form__row" data-prj-task-show="existing" hidden>
+            <div class="form-field"><label class="form-label" for="prj-task-ticket">Ticket ID</label><input class="form-input" id="prj-task-ticket" name="ticket_id" inputmode="numeric" placeholder="1234"><p class="form-help">Must be a ticket for {{ p.company_name }} that isn't in another project.</p></div>
+          </div>
+          <div class="prj-form__row">
+            <div class="form-field"><label class="form-label" for="prj-task-phase">Phase</label>
+              <select class="form-input" id="prj-task-phase" name="phase_id"><option value="">No phase</option>{% for phase in detail.phases %}<option value="{{ phase.id }}">{{ phase.name }}</option>{% endfor %}</select></div>
+            <div class="form-field"><label class="form-label" for="prj-task-estimate">Estimate (hours) <span class="field-optional">optional</span></label><input class="form-input" id="prj-task-estimate" name="estimate_hours" type="number" min="0" step="0.25"></div>
+            <div class="form-actions"><button type="submit" class="button button--primary">Add task</button></div>
+          </div>
+        </form>
+      </details>
+      <details class="prj-disclosure">
+        <summary class="button button--ghost button--small">+ Add phase</summary>
+        <form method="post" action="/admin/projects/{{ p.id }}/phases" class="prj-form prj-form__row">
+          {% include "partials/csrf.html" %}
+          <div class="form-field prj-grow"><label class="form-label" for="prj-phase-name">Phase</label><input class="form-input" id="prj-phase-name" name="name" maxlength="255" placeholder="e.g. Planning, Rollout, Handover" required></div>
+          <div class="form-field"><label class="form-label" for="prj-phase-due">Due <span class="field-optional">optional</span></label><input class="form-input" id="prj-phase-due" name="due_date" type="date"></div>
+          <div class="form-actions"><button type="submit" class="button button--primary">Add phase</button></div>
+        </form>
+      </details>
+    </div>
+
+    {% for group in detail.groups %}
+    <div class="prj-phase">
+      <div class="prj-phase__head">
+        <h3 class="prj-phase__title">{{ group.phase.name if group.phase else ("Tasks" if detail.phases | length == 0 else "No phase") }}</h3>
+        <span class="text-muted">{{ group.done }} of {{ group.tasks | length }} done · {{ group.spent_text }} of {{ group.estimate_text }} estimated{% if group.phase and group.phase.due_date %} · due {{ group.phase.due_date.isoformat() }}{% endif %}</span>
+        {% if group.phase %}
+        <span class="prj-phase__actions">
+          {% for action, label in (("up", "↑"), ("down", "↓")) %}
+          <form method="post" action="/admin/projects/{{ p.id }}/phases/{{ group.phase.id }}">{% include "partials/csrf.html" %}<input type="hidden" name="action" value="{{ action }}"><button type="submit" class="button button--ghost button--small" aria-label="Move {{ group.phase.name }} {{ action }}">{{ label }}</button></form>
+          {% endfor %}
+          <details class="prj-disclosure prj-disclosure--inline">
+            <summary class="button button--ghost button--small">Edit</summary>
+            <form method="post" action="/admin/projects/{{ p.id }}/phases/{{ group.phase.id }}" class="prj-form prj-form__row">
+              {% include "partials/csrf.html" %}
+              <div class="form-field"><label class="form-label" for="prj-phase-{{ group.phase.id }}-name">Name</label><input class="form-input" id="prj-phase-{{ group.phase.id }}-name" name="name" value="{{ group.phase.name }}" maxlength="255"></div>
+              <div class="form-field"><label class="form-label" for="prj-phase-{{ group.phase.id }}-due">Due</label><input class="form-input" id="prj-phase-{{ group.phase.id }}-due" name="due_date" type="date" value="{{ group.phase.due_date.isoformat() if group.phase.due_date else '' }}"></div>
+              <div class="form-actions"><button type="submit" class="button button--primary button--small">Save</button>
+                <button type="submit" name="action" value="delete" class="button button--danger button--small" data-confirm="Delete the {{ group.phase.name }} phase? Its tasks are kept.">Delete phase</button></div>
+            </form>
+          </details>
+        </span>
+        {% endif %}
+      </div>
+      {% if group.tasks %}
+      <div class="table-wrapper"><table class="table prj-tasks">
+        <caption class="visually-hidden">Tasks in {{ group.phase.name if group.phase else "no phase" }}</caption>
+        <thead><tr><th scope="col">Task</th><th scope="col">Status</th><th scope="col">Assigned</th><th scope="col">Time</th><th scope="col" class="table__actions"><span class="visually-hidden">Change</span></th></tr></thead>
+        <tbody>
+        {% for task in group.tasks %}
+          <tr class="{% if task.done %}prj-task--done{% endif %}">
+            <td data-label="Task"><a href="/admin/tickets/{{ task.ticket_id }}">#{{ task.ticket_number or task.ticket_id }}</a> {{ task.subject }}</td>
+            <td data-label="Status"><span class="status status--{{ 'success' if task.done else 'info' }}">{{ task.status | replace('_', ' ') | title }}</span></td>
+            <td data-label="Assigned">{{ task.assignee or "—" }}</td>
+            <td data-label="Time">{{ task.spent_text }}{% if task.estimate_hours %} of {{ hours_text(task.estimate_hours * 60) }}{% endif %}{% if task.over_estimate %} <span class="status status--warning">Over</span>{% endif %}</td>
+            <td class="table__actions">
+              <details class="prj-disclosure prj-disclosure--inline">
+                <summary class="button button--ghost button--small">Change</summary>
+                <form method="post" action="/admin/projects/{{ p.id }}/tasks/{{ task.ticket_id }}" class="prj-form prj-form__row">
+                  {% include "partials/csrf.html" %}
+                  <div class="form-field"><label class="form-label" for="prj-t{{ task.ticket_id }}-phase">Phase</label>
+                    <select class="form-input" id="prj-t{{ task.ticket_id }}-phase" name="phase_id"><option value="">No phase</option>{% for phase in detail.phases %}<option value="{{ phase.id }}" {% if task.phase_id == phase.id %}selected{% endif %}>{{ phase.name }}</option>{% endfor %}</select></div>
+                  <div class="form-field"><label class="form-label" for="prj-t{{ task.ticket_id }}-estimate">Estimate (h)</label><input class="form-input" id="prj-t{{ task.ticket_id }}-estimate" name="estimate_hours" type="number" min="0" step="0.25" value="{{ '%g' | format(task.estimate_hours) if task.estimate_hours is not none else '' }}"></div>
+                  <div class="form-actions"><button type="submit" class="button button--primary button--small">Save</button>
+                    <button type="submit" name="action" value="remove" class="button button--ghost button--small" data-confirm="Remove this ticket from the project? The ticket is kept.">Remove from project</button></div>
+                </form>
+              </details>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+      {% else %}
+      <p class="text-muted prj-phase__empty">No tasks yet.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+
+  <section class="card card--panel admin-grid__full" id="project-milestones" aria-labelledby="prj-milestones-heading">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="prj-milestones-heading">Milestones</h2>
+        <p class="card__subtitle">{% if p.billing_type == "fixed_fee" %}How the {{ money(p.budget_amount) }} fee is billed. {{ money(f.milestones_planned) }} planned, {{ money(f.milestones_invoiced) }} invoiced{% if f.milestones_unplanned %}, {{ money(f.milestones_unplanned) }} not yet in a milestone{% endif %}.{% else %}Optional payments on top of ticket time, such as a deposit.{% endif %}</p>
+      </div>
+    </div>
+    {% if detail.milestones %}
+    <div class="table-wrapper"><table class="table">
+      <caption class="visually-hidden">Milestones</caption>
+      <thead><tr><th scope="col">Milestone</th><th scope="col">Amount</th><th scope="col">Due</th><th scope="col">Status</th><th scope="col" class="table__actions"><span class="visually-hidden">Actions</span></th></tr></thead>
+      <tbody>
+      {% for item in detail.milestones %}
+        <tr>
+          <td data-label="Milestone">{{ item.name }}{% if item.phase_id %}{% for phase in detail.phases if phase.id == item.phase_id %} <span class="text-muted">· {{ phase.name }}</span>{% endfor %}{% endif %}</td>
+          <td data-label="Amount">{{ money(item.amount) }}</td>
+          <td data-label="Due">{{ item.due_date.isoformat() if item.due_date else "—" }}</td>
+          <td data-label="Status"><span class="status status--{{ MILESTONE_VARIANT.get(item.status, 'neutral') }}">{{ milestone_statuses.get(item.status, item.status) }}</span>{% if item.invoice_number %} <a href="/invoices">{{ item.invoice_number }}</a>{% endif %}</td>
+          <td class="table__actions">
+            {% if item.status in ("pending", "ready") %}
+              {% if can_invoice %}
+              <form method="post" action="/admin/projects/{{ p.id }}/milestones/{{ item.id }}/invoice" class="prj-inline" data-confirm="Create a draft invoice for {{ item.name }} ({{ money(item.amount) }}) for {{ p.company_name }}?">
+                {% include "partials/csrf.html" %}<button type="submit" class="button button--primary button--small">Create invoice</button>
+              </form>
+              {% endif %}
+              <form method="post" action="/admin/projects/{{ p.id }}/milestones/{{ item.id }}" class="prj-inline" data-confirm="Delete the {{ item.name }} milestone?">
+                {% include "partials/csrf.html" %}<input type="hidden" name="action" value="delete"><button type="submit" class="button button--ghost button--small">Delete</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% if not can_invoice and detail.milestones | selectattr("status", "in", ["pending", "ready"]) | list %}<p class="form-help">A super admin creates the invoices.</p>{% endif %}
+    {% else %}
+    <p class="text-muted">{% if p.billing_type == "fixed_fee" %}No milestones yet. Split the fee into payments, such as a 30% deposit and the rest at go-live.{% else %}No milestones. Time on the project's tickets is invoiced as usual.{% endif %}</p>
+    {% endif %}
+    <details class="prj-disclosure" {% if p.billing_type == "fixed_fee" and not detail.milestones %}open{% endif %}>
+      <summary class="button button--ghost button--small">+ Add milestone</summary>
+      <form method="post" action="/admin/projects/{{ p.id }}/milestones" class="prj-form prj-form__row">
+        {% include "partials/csrf.html" %}
+        <div class="form-field prj-grow"><label class="form-label" for="prj-ms-name">Milestone</label><input class="form-input" id="prj-ms-name" name="name" maxlength="255" placeholder="e.g. Deposit" required></div>
+        <div class="form-field"><label class="form-label" for="prj-ms-amount">Amount</label><input class="form-input" id="prj-ms-amount" name="amount" type="number" min="0.01" step="0.01" required{% if f.milestones_unplanned and f.milestones_unplanned > 0 %} placeholder="{{ money(f.milestones_unplanned) }}"{% endif %}></div>
+        <div class="form-field"><label class="form-label" for="prj-ms-due">Due <span class="field-optional">optional</span></label><input class="form-input" id="prj-ms-due" name="due_date" type="date"></div>
+        <div class="form-field"><label class="form-label" for="prj-ms-phase">With phase <span class="field-optional">optional</span></label>
+          <select class="form-input" id="prj-ms-phase" name="phase_id"><option value="">—</option>{% for phase in detail.phases %}<option value="{{ phase.id }}">{{ phase.name }}</option>{% endfor %}</select></div>
+        <label class="prj-check"><input type="checkbox" name="ready" value="1"> Ready to invoice</label>
+        <div class="form-actions"><button type="submit" class="button button--primary">Add milestone</button></div>
+      </form>
+    </details>
+  </section>
+
+  {% if is_super_admin %}
+  <section class="card card--panel admin-grid__full" aria-labelledby="prj-delete-heading">
+    <div class="card__header"><div>
+      <h2 class="card__title" id="prj-delete-heading">Delete project</h2>
+      <p class="card__subtitle">Deletes the project, its phases and milestones. Its tickets and their time are kept. Projects with invoiced milestones can't be deleted.</p>
+    </div></div>
+    <form method="post" action="/admin/projects/{{ p.id }}/delete" data-confirm="Delete {{ p.name }}? Its tickets are kept.">
+      {% include "partials/csrf.html" %}<button type="submit" class="button button--danger">Delete project</button>
+    </form>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/projects.js') }}" defer></script>{% endblock %}
