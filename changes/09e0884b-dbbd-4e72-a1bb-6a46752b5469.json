@@ -1,0 +1,7 @@
+{
+  "guid": "09e0884b-dbbd-4e72-a1bb-6a46752b5469",
+  "occurred_at": "2026-11-27T06:16Z",
+  "change_type": "Feature",
+  "summary": "Application patch policies can now ignore pending reboots and checksum mismatches, matching the options already offered when pushing a package.",
+  "content_hash": "e926eb4641b14e74848ec8e1a01962af6d0fb8118309aee7e6604ec237628d2b"
+}

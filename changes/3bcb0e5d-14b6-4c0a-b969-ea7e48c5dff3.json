@@ -1,0 +1,7 @@
+{
+  "guid": "3bcb0e5d-14b6-4c0a-b969-ea7e48c5dff3",
+  "occurred_at": "2026-11-27T06:16Z",
+  "change_type": "Feature",
+  "summary": "Device rules can now target devices with vulnerable software, or with a named installed app that has open vulnerabilities, so checks, tasks and patch policies can run only where they are needed.",
+  "content_hash": "8b9e3654dd56189ea3614c520b0e1e8a23800e7cf7692171c2bd208f010c042a"
+}
