@@ -71,7 +71,7 @@
                         <td>Company #{{ sub.customer_id }}</td>
                         <td>{{ sub.quantity }}{% if sub.voice_monitor_contract %} monitored number{% if sub.quantity != 1 %}s{% endif %}<br><small>{{ sub.voice_monitor_contract.included_attempts }} calls/month included</small>{% endif %}</td>
                         <td>{{ sub.start_date }}</td>
-                        <td>{{ sub.end_date }}</td>
+                        <td>{{ sub.display_end_date or '—' }}</td>
                         <td>
                             <span class="badge badge-{{ sub.status }}">
                                 {{ sub.status }}

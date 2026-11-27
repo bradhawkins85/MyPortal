@@ -125,7 +125,7 @@
             <td data-column="quantity" data-value="{{ subscription.quantity }}">{{ subscription.quantity }}{% if subscription.voice_monitor_contract %} monitored number{% if subscription.quantity != 1 %}s{% endif %}{% endif %}</td>
             <td data-column="unit_price" data-value="{{ subscription.unit_price }}">${{ subscription.unit_price }}{% if subscription.voice_monitor_contract %} / number<br><small>{{ subscription.voice_monitor_contract.included_attempts }} calls included/month; ${{ subscription.voice_monitor_contract.attempt_overage_price }}/extra attempt + ${{ subscription.voice_monitor_contract.connected_minute_price }}/connected minute; ${{ subscription.voice_monitor_contract.transcription_surcharge }}/completed transcription</small>{% endif %}</td>
             <td data-column="start_date" data-value="{{ subscription.start_date }}">{{ subscription.start_date }}</td>
-            <td data-column="end_date" data-value="{{ subscription.end_date }}">{{ subscription.end_date }}</td>
+            <td data-column="end_date" data-value="{{ subscription.display_end_date or '' }}">{{ subscription.display_end_date or '—' }}</td>
             <td data-column="status" data-value="{{ subscription.status }}">
               <span class="tag {% if subscription.status == 'active' %}tag--success{% elif subscription.status == 'pending_renewal' %}tag--warning{% elif subscription.status == 'expired' %}tag--danger{% else %}tag--secondary{% endif %}">
                 {{ subscription.status | replace('_', ' ') | title }}

@@ -1,0 +1,7 @@
+{
+  "guid": "b345159f-dc88-41ee-bc55-a5ec42f49d33",
+  "occurred_at": "2026-11-27T04:28Z",
+  "change_type": "Feature",
+  "summary": "The dispatch board now reads technicians' Outlook calendars when Microsoft 365 sync is on, shows their busy time as Unavailable (without any event details), and won't let an appointment be booked over busy time or another booking.",
+  "content_hash": "4c6e3135b37f7d33647722aac28795f4db3fabc49a8ae8881245d5bec73e2e61"
+}
