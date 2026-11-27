@@ -8,10 +8,12 @@
 * ``POST /admin/schedule/settings`` (super admins) calendar sync, time zone,
   working hours and default length
 * ``/api/appointments`` and ``/api/tickets/{id}/appointments``
+* ``GET /api/scheduling/availability`` a technician's taken time on a day
 * each ticket page's Appointments card
 
-A background job retries Microsoft 365 calendar writes that failed (on one
-instance at a time; see :mod:`app.services.singleton_jobs`).
+A background job retries Microsoft 365 calendar writes that failed and imports
+technicians' busy time (only when, never what) from their calendars, on one
+instance at a time (see :mod:`app.services.singleton_jobs`).
 
 Disable it with ``DISABLED_FEATURE_PACKS=scheduling``. Appointments stay in
 the database and in technicians' calendars.
@@ -26,7 +28,7 @@ from .routes import router
 
 PACK = FeaturePack(
     slug="scheduling",
-    version="1.0.0",
+    version="1.1.0",
     routers=(router,),
     background_jobs=(scheduling.sync_job,),
 )
