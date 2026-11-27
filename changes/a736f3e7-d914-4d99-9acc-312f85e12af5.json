@@ -1,0 +1,7 @@
+{
+  "guid": "a736f3e7-d914-4d99-9acc-312f85e12af5",
+  "occurred_at": "2026-11-27T04:28Z",
+  "change_type": "Improvement",
+  "summary": "Tickets: Book appointment now opens the booking editor on the ticket itself and brings you back to the ticket once the appointment is booked",
+  "content_hash": "3fe1774a87949bb32083f4d9fd6db3fe817f5c577f596ff02bfa14292d18b56c"
+}
